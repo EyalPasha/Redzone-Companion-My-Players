@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0f1419;
+  --foreground: #f8fafc;
+  --primary: #1e3a8a;
+  --primary-light: #3b82f6;
+  --secondary: #1e293b;
+  --accent: #10b981;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: inherit;
+  line-height: 1.6;
+}
+
+/* Hide Next.js development indicators */
+[data-nextjs-scroll-focus-boundary] {
+  display: contents;
+}
+
+/* Hide any powered by or dev indicators */
+div[data-overlay-container] {
+  display: none !important;
+}
+
+/* Hide Next.js development overlay */
+nextjs-portal {
+  display: none !important;
+}
+
+/* Hide Vercel toolbar */
+.__vercel_toolbar {
+  display: none !important;
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
+  }
+  
+  .btn-primary {
+    @apply bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500;
+  }
+  
+  .btn-secondary {
+    @apply bg-slate-600 text-white hover:bg-slate-700 focus:ring-slate-500;
+  }
+  
+  .btn-success {
+    @apply bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500;
+  }
+  
+  .btn-danger {
+    @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+  }
+  
+  .card {
+    @apply bg-slate-800 border border-slate-700 rounded-xl shadow-lg;
+  }
+  
+  .input {
+    @apply w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  .gradient-bg {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e293b 100%);
+  }
+}
