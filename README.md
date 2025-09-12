@@ -16,27 +16,7 @@ A professional fantasy football tracking application that allows you to monitor 
 - **Caching System**: Smart data caching to minimize API calls
 - **Weather Integration**: Highlight adverse weather conditions that may affect gameplay
 
-## � Screenshots
-
-### Dashboard - League Management
-
-![Dashboard](docs/dashboard.png)
-*Manage your fantasy leagues with custom nicknames and user selection*
-
-### RedZone View - Game Tracking Interface
-
-![Game Tracking - Chicago vs Detroit](docs/game-view-1.png)
-*Track your players and opponents during live games - Chicago Bears vs Detroit Lions*
-
-![Game Tracking - Buffalo vs NY Jets](docs/game-view-2.png)
-*Monitor multiple games with keyboard shortcuts - Buffalo Bills vs New York Jets*
-
-### Game Configuration Modal
-
-![Game Configuration](docs/game-config.png)
-*Configure which games to show and organize by time windows*
-
-## �🚀 Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -240,3 +220,11 @@ For issues or questions:
 - [ESPN](https://espn.com) for NFL game data
 - [Supabase](https://supabase.io) for backend infrastructure
 - [Next.js](https://nextjs.org) team for the amazing framework
+
+## 📸 Screenshots
+
+imgs\header.png
+imgs\start.png
+imgs\players2.png
+imgs\players1.png
+imgs\config.png
