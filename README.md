@@ -7,7 +7,6 @@ A professional fantasy football tracking application that allows you to monitor 
 ## ✨ Features
 
 - **Multi-League Support**: Track players across multiple Sleeper fantasy leagues
-- **Live Game Tracking**: Monitor your players during live NFL games with ESPN integration
 - **Player Management**: View both your players and opponents' players by game
 - **Game Configuration**: Show/hide specific games and customize display order
 - **Player Headshots**: Visual player identification with Sleeper CDN integration  
@@ -223,8 +222,12 @@ For issues or questions:
 
 ## 📸 Screenshots
 
-imgs\header.png
-imgs\start.png
-imgs\players2.png
-imgs\players1.png
-imgs\config.png
+![Header](imgs/header.png)
+
+![Start Screen](imgs/start.png)
+
+![Players View 2](imgs/players2.png)
+
+![Players View 1](imgs/players1.png)
+
+![Configuration](imgs/config.png)
