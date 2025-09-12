@@ -2,7 +2,7 @@
 
 A professional fantasy football tracking application that allows you to monitor your players across multiple Sleeper leagues during live NFL games. Perfect for RedZone viewing sessions!
 
-![RedZone Companion](public/logo.png)
+<img src="public/logo.png" alt="RedZone Companion" width="100">
 
 ## ✨ Features
 
