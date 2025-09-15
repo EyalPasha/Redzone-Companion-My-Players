@@ -7,7 +7,8 @@ export const STORAGE_KEYS = {
   SELECTED_GAME: 'redzone_selected_game',
   CURRENT_WEEK: 'redzone_current_week',
   CURRENT_VIEW: 'redzone_current_view',
-  USER_LEAGUES: 'redzone_user_leagues'
+  USER_LEAGUES: 'redzone_user_leagues',
+  HIDDEN_LEAGUES: 'redzone_hidden_leagues'
 } as const
 
 export interface GameConfig {
@@ -28,30 +29,80 @@ const CACHE_DURATION = 30 * 60 * 1000
 // Storage quota management
 const MAX_STORAGE_SIZE = 4 * 1024 * 1024 // 4MB limit to be safe
 
+// Debounced storage writes to reduce frequent localStorage operations
+const debounceMap = new Map<string, NodeJS.Timeout>()
+const DEBOUNCE_DELAY = 500 // 500ms debounce
+
 export const storage = {
-  // Generic cache methods
+  // Generic cache methods with debouncing for frequent updates
   set: (key: string, data: any) => {
     const cachedData: CachedData = {
       timestamp: Date.now(),
       data
     }
     const dataString = JSON.stringify(cachedData)
-    
+
+    // Clear existing debounce timeout for this key
+    if (debounceMap.has(key)) {
+      clearTimeout(debounceMap.get(key)!)
+    }
+
+    // Set debounced write operation
+    const timeoutId = setTimeout(() => {
+      try {
+        localStorage.setItem(key, dataString)
+      } catch (error: any) {
+        if (error.name === 'QuotaExceededError') {
+          console.warn(`Storage quota exceeded for key: ${key}. Clearing cache and retrying...`)
+
+          // Clear expired cache first
+          storage.clearExpired()
+
+          try {
+            localStorage.setItem(key, dataString)
+          } catch (retryError: any) {
+            if (retryError.name === 'QuotaExceededError') {
+              console.warn(`Still quota exceeded for key: ${key}. Skipping cache for this item.`)
+              // For Sleeper players specifically, don't cache the full dataset
+              if (key === STORAGE_KEYS.SLEEPER_PLAYERS) {
+                console.log('Skipping Sleeper players cache due to size - will fetch fresh each time')
+                return
+              }
+            } else {
+              throw retryError
+            }
+          }
+        } else {
+          throw error
+        }
+      } finally {
+        debounceMap.delete(key)
+      }
+    }, DEBOUNCE_DELAY)
+
+    debounceMap.set(key, timeoutId)
+  },
+
+  // Immediate set for critical data (no debouncing)
+  setImmediate: (key: string, data: any) => {
+    const cachedData: CachedData = {
+      timestamp: Date.now(),
+      data
+    }
+    const dataString = JSON.stringify(cachedData)
+
     try {
       localStorage.setItem(key, dataString)
     } catch (error: any) {
       if (error.name === 'QuotaExceededError') {
         console.warn(`Storage quota exceeded for key: ${key}. Clearing cache and retrying...`)
-        
-        // Clear expired cache first
         storage.clearExpired()
-        
+
         try {
           localStorage.setItem(key, dataString)
         } catch (retryError: any) {
           if (retryError.name === 'QuotaExceededError') {
             console.warn(`Still quota exceeded for key: ${key}. Skipping cache for this item.`)
-            // For Sleeper players specifically, don't cache the full dataset
             if (key === STORAGE_KEYS.SLEEPER_PLAYERS) {
               console.log('Skipping Sleeper players cache due to size - will fetch fresh each time')
               return
@@ -179,6 +230,15 @@ export const storage = {
 
   setUserLeagues: (leagues: any[]) => {
     storage.set(STORAGE_KEYS.USER_LEAGUES, leagues)
+  },
+
+  // Hidden leagues
+  getHiddenLeagues: (): string[] => {
+    return storage.get(STORAGE_KEYS.HIDDEN_LEAGUES) || []
+  },
+
+  setHiddenLeagues: (leagueIds: string[]) => {
+    storage.set(STORAGE_KEYS.HIDDEN_LEAGUES, leagueIds)
   },
 
   // Clear all cache

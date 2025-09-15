@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, memo } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { 
-  fetchCurrentWeekGames, 
-  fetchSleeperNFLState, 
+import {
+  fetchFilteredCurrentWeekGames,
+  fetchSleeperNFLState,
   fetchSleeperLeagueRosters,
   fetchSleeperLeagueUsers,
   fetchSleeperMatchups,
@@ -35,6 +35,17 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
   const [filteredGames, setFilteredGames] = useState<ESPNGame[]>([])
   const [showGameConfig, setShowGameConfig] = useState(false)
   const [message, setMessage] = useState('')
+  const [hiddenLeagues, setHiddenLeagues] = useState<Set<string>>(new Set())
+  const [showLeagueFilter, setShowLeagueFilter] = useState(false)
+  const [showAllLeagues, setShowAllLeagues] = useState(false)
+  const [allLeaguesData, setAllLeaguesData] = useState<Array<{
+    leagueId: string
+    leagueName: string
+    userRoster: { rosterId: number, points: number, projectedPoints: number, owner: string }
+    opponentRoster: { rosterId: number, points: number, projectedPoints: number, owner: string }
+    matchupId: number
+  }>>([])
+  const [allLeaguesLoading, setAllLeaguesLoading] = useState(false)
   
 
   const fetchUserLeagues = async () => {
@@ -179,24 +190,23 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
     setError('')
 
     try {
-      // Fetch current week games and NFL state in parallel
-      const [gamesData, nflState, playersData] = await Promise.all([
-        fetchCurrentWeekGames(),
-        fetchSleeperNFLState(),
+      // Fetch filtered current week games and players data in parallel
+      const [filteredGamesData, playersData] = await Promise.all([
+        fetchFilteredCurrentWeekGames(),
         fetchSleeperPlayers()
       ])
 
-      setGames(gamesData.events)
-      setCurrentWeek(nflState.week || 1)
+      setGames(filteredGamesData.events)
+      setCurrentWeek(filteredGamesData.week.number)
       setSleeperPlayers(playersData)
 
       // Cache the data
-      storage.setGames(gamesData.events)
-      storage.setCurrentWeek(nflState.week || 1)
+      storage.setGames(filteredGamesData.events)
+      storage.setCurrentWeek(filteredGamesData.week.number)
       // Note: Sleeper players will be cached as compact data in fetchAllLineups
 
       // Fetch lineups for all user leagues
-      await fetchAllLineups(nflState.week || 1, playersData)
+      await fetchAllLineups(filteredGamesData.week.number, playersData)
 
     } catch (error: any) {
       setError('Error fetching data: ' + error.message)
@@ -211,16 +221,13 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
     loadCachedData()
   }, [])
 
-  // Update filtered games when games or config changes
-  useEffect(() => {
-    applyGameConfiguration()
-  }, [games, gameConfig])
+  // Removed redundant useEffect - now handled by memoized filteredGamesMemo
 
   // Keyboard navigation for game selection only
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       const key = e.key
-      
+
       // Game selection (1-9, A-Z)
       if (key >= '1' && key <= '9') {
         const gameIndex = parseInt(key) - 1
@@ -241,6 +248,18 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
     return () => window.removeEventListener('keydown', handleKeyPress)
   }, [filteredGames.length])
 
+  // Close league filter dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showLeagueFilter && !(e.target as Element)?.closest('.relative')) {
+        setShowLeagueFilter(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showLeagueFilter])
+
   const loadCachedData = () => {
     // Load cached data
     const cachedGames = storage.getGames()
@@ -249,6 +268,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
     const cachedWeek = storage.getCurrentWeek()
     const cachedConfig = storage.getGameConfig()
     const cachedSelectedGame = storage.getSelectedGame()
+    const cachedHiddenLeagues = storage.getHiddenLeagues()
 
     if (cachedGames) {
       setGames(cachedGames)
@@ -268,27 +288,23 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
     if (cachedSelectedGame !== null) {
       setSelectedGameIndex(cachedSelectedGame)
     }
+    if (cachedHiddenLeagues) {
+      setHiddenLeagues(new Set(cachedHiddenLeagues))
+    }
 
     // Clear expired cache
     storage.clearExpired()
   }
 
-  const applyGameConfiguration = () => {
-    if (games.length === 0) {
-      setFilteredGames([])
-      return
-    }
-
-    if (gameConfig.length === 0) {
-      // No config yet, show all games
-      setFilteredGames(games)
-      return
-    }
+  // Memoized game filtering to avoid recalculation on every render
+  const filteredGamesMemo = useMemo(() => {
+    if (games.length === 0) return []
+    if (gameConfig.length === 0) return games
 
     // Apply configuration
     const configMap = new Map(gameConfig.map(c => [c.gameId, c]))
-    
-    const filtered = games
+
+    return games
       .map(game => ({
         game,
         config: configMap.get(game.id) || { gameId: game.id, isVisible: true, customOrder: games.indexOf(game) }
@@ -296,19 +312,22 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
       .filter(({ config }) => config.isVisible)
       .sort((a, b) => a.config.customOrder - b.config.customOrder)
       .map(({ game }) => game)
+  }, [games, gameConfig])
 
-    setFilteredGames(filtered)
-  }
+  // Update filteredGames state when memoized value changes
+  useEffect(() => {
+    setFilteredGames(filteredGamesMemo)
+  }, [filteredGamesMemo])
 
-  const handleGameConfigSave = (newConfig: GameConfig[]) => {
+  const handleGameConfigSave = useCallback((newConfig: GameConfig[]) => {
     setGameConfig(newConfig)
     storage.setGameConfig(newConfig)
-  }
+  }, [])
 
-  const handleGameClick = (index: number) => {
+  const handleGameClick = useCallback((index: number) => {
     setSelectedGameIndex(index)
     storage.setSelectedGame(index)
-  }
+  }, [])
 
   const getKeyboardLabel = (index: number): string => {
     if (index < 9) {
@@ -318,39 +337,175 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
     }
   }
 
-  const getPlayersForGame = (game: ESPNGame) => {
-    if (!game.competitions[0]) return { homeTeam: { myPlayers: [], opponents: [] }, awayTeam: { myPlayers: [], opponents: [] } }
+  // Memoized unique leagues calculation
+  const uniqueLeagues = useMemo((): Array<{id: string, name: string}> => {
+    const leagueMap = new Map<string, string>()
 
-    const homeTeam = game.competitions[0].competitors.find(c => c.homeAway === 'home')
-    const awayTeam = game.competitions[0].competitors.find(c => c.homeAway === 'away')
+    playerLineups.forEach(player => {
+      player.leagueIds.forEach((leagueId, index) => {
+        const leagueName = player.leagueNames[index]
+        leagueMap.set(leagueId, leagueName)
+      })
+    })
 
-    const homeTeamAbbr = homeTeam?.team.abbreviation || ''
-    const awayTeamAbbr = awayTeam?.team.abbreviation || ''
+    return Array.from(leagueMap.entries()).map(([id, name]) => ({ id, name }))
+  }, [playerLineups])
 
-    const result = {
-      homeTeam: { myPlayers: [] as PlayerLineup[], opponents: [] as PlayerLineup[] },
-      awayTeam: { myPlayers: [] as PlayerLineup[], opponents: [] as PlayerLineup[] }
+  const toggleLeagueVisibility = useCallback((leagueId: string) => {
+    setHiddenLeagues(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(leagueId)) {
+        newSet.delete(leagueId)
+      } else {
+        newSet.add(leagueId)
+      }
+
+      // Persist to storage
+      const leagueArray = Array.from(newSet)
+      storage.setHiddenLeagues(leagueArray)
+
+      return newSet
+    })
+  }, [])
+
+  const fetchAllLeaguesMatchups = useCallback(async (week: number) => {
+    if (userLeagues.length === 0) return
+
+    setAllLeaguesLoading(true)
+    const allLeaguesMatchups = []
+
+    try {
+      for (const league of userLeagues) {
+        const leagueId = league.sleeper_league_id
+        const sleeperUserId = league.sleeper_user_id
+
+        if (!sleeperUserId) continue
+
+        // Fetch league data
+        const [rosters, users, matchups] = await Promise.all([
+          fetchSleeperLeagueRosters(leagueId),
+          fetchSleeperLeagueUsers(leagueId),
+          fetchSleeperMatchups(leagueId, week)
+        ])
+
+        // Find user's roster
+        const userRoster = findUserRoster(rosters, sleeperUserId)
+        if (!userRoster) continue
+
+        // Find user's matchup
+        const userMatchup = matchups.find(m => m.roster_id === userRoster.roster_id)
+        if (!userMatchup) continue
+
+        // Find opponent's matchup and roster
+        const opponentMatchup = matchups.find(m =>
+          m.matchup_id === userMatchup.matchup_id && m.roster_id !== userRoster.roster_id
+        )
+        const opponentRoster = opponentMatchup ? rosters.find(r => r.roster_id === opponentMatchup.roster_id) : null
+
+        // Find user names
+        const userOwner = users.find(u => u.user_id === userRoster.owner_id)?.display_name || 'You'
+        const opponentOwner = opponentRoster ?
+          users.find(u => u.user_id === opponentRoster.owner_id)?.display_name || 'Opponent' : 'Bye Week'
+
+        // Calculate projected points (simple estimation based on current scoring rate)
+        const userProjectedPoints = userMatchup.points || 0
+        const opponentProjectedPoints = opponentMatchup?.points || 0
+
+        allLeaguesMatchups.push({
+          leagueId: league.sleeper_league_id,
+          leagueName: league.custom_nickname || league.league_name || 'League',
+          userRoster: {
+            rosterId: userRoster.roster_id,
+            points: userMatchup.points || 0,
+            projectedPoints: userProjectedPoints,
+            owner: userOwner
+          },
+          opponentRoster: {
+            rosterId: opponentRoster?.roster_id || 0,
+            points: opponentMatchup?.points || 0,
+            projectedPoints: opponentProjectedPoints,
+            owner: opponentOwner
+          },
+          matchupId: userMatchup.matchup_id
+        })
+      }
+
+      setAllLeaguesData(allLeaguesMatchups)
+      // Cache the data
+      storage.set('redzone_all_leagues_matchups', allLeaguesMatchups)
+
+    } catch (error: any) {
+      setError('Error fetching all leagues data: ' + error.message)
+    } finally {
+      setAllLeaguesLoading(false)
     }
+  }, [userLeagues])
 
-    for (const player of playerLineups) {
-      if (player.team === homeTeamAbbr) {
-        if (player.isOpponent) {
-          result.homeTeam.opponents.push(player)
-        } else {
-          result.homeTeam.myPlayers.push(player)
-        }
-      } else if (player.team === awayTeamAbbr) {
-        if (player.isOpponent) {
-          result.awayTeam.opponents.push(player)
-        } else {
-          result.awayTeam.myPlayers.push(player)
-        }
+  // Memoized function to get players for a specific game - optimized for performance
+  const getPlayersForGame = useMemo(() => {
+    // Create a map of team abbreviations to players for faster lookup
+    const teamPlayerMap = new Map<string, { myPlayers: PlayerLineup[], opponents: PlayerLineup[] }>()
+
+    // Pre-filter visible players once instead of per game
+    const visiblePlayers = playerLineups.filter(player =>
+      player.leagueIds.some(leagueId => !hiddenLeagues.has(leagueId))
+    )
+
+    // Process each visible player once and group by team
+    for (const player of visiblePlayers) {
+      // Filter out hidden leagues from the player's data
+      const visibleLeagueIndices = player.leagueIds
+        .map((leagueId, index) => ({ leagueId, index }))
+        .filter(({ leagueId }) => !hiddenLeagues.has(leagueId))
+
+      const filteredPlayer = {
+        ...player,
+        leagueIds: visibleLeagueIndices.map(({ leagueId }) => leagueId),
+        leagueNames: visibleLeagueIndices.map(({ index }) => player.leagueNames[index])
+      }
+
+      if (!teamPlayerMap.has(player.team)) {
+        teamPlayerMap.set(player.team, { myPlayers: [], opponents: [] })
+      }
+
+      const teamData = teamPlayerMap.get(player.team)!
+      if (player.isOpponent) {
+        teamData.opponents.push(filteredPlayer)
+      } else {
+        teamData.myPlayers.push(filteredPlayer)
       }
     }
 
-    return result
-  }
+    // Return optimized lookup function
+    return (game: ESPNGame) => {
+      if (!game.competitions[0]) return { homeTeam: { myPlayers: [], opponents: [] }, awayTeam: { myPlayers: [], opponents: [] } }
 
+      const homeTeam = game.competitions[0].competitors.find(c => c.homeAway === 'home')
+      const awayTeam = game.competitions[0].competitors.find(c => c.homeAway === 'away')
+
+      const homeTeamAbbr = homeTeam?.team.abbreviation || ''
+      const awayTeamAbbr = awayTeam?.team.abbreviation || ''
+
+      return {
+        homeTeam: teamPlayerMap.get(homeTeamAbbr) || { myPlayers: [], opponents: [] },
+        awayTeam: teamPlayerMap.get(awayTeamAbbr) || { myPlayers: [], opponents: [] }
+      }
+    }
+  }, [playerLineups, hiddenLeagues])
+
+  // Memoized selected game and players calculation to avoid unnecessary recalculations
+  // IMPORTANT: Must be before any conditional returns to maintain hook order
+  const selectedGame = useMemo(() =>
+    selectedGameIndex !== null ? filteredGames[selectedGameIndex] : null,
+    [selectedGameIndex, filteredGames]
+  )
+
+  const selectedGamePlayers = useMemo(() =>
+    selectedGame ? getPlayersForGame(selectedGame) : null,
+    [selectedGame, getPlayersForGame]
+  )
+
+  // Early return for empty state - after all hooks are called
   if (filteredGames.length === 0 && !loading) {
     return (
       <div className="min-h-screen bg-slate-900 text-white">
@@ -397,9 +552,6 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
     )
   }
 
-  const selectedGame = selectedGameIndex !== null ? filteredGames[selectedGameIndex] : null
-  const selectedGamePlayers = selectedGame ? getPlayersForGame(selectedGame) : null
-
   return (
     <div className="min-h-screen bg-slate-900 text-white">
       {/* Header with Controls */}
@@ -426,6 +578,49 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
               >
                 {loading ? 'Loading...' : 'Refresh Data'}
               </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowLeagueFilter(!showLeagueFilter)}
+                  className="btn btn-secondary"
+                >
+                  Filter Leagues
+                </button>
+                {showLeagueFilter && (
+                  <div className="absolute right-0 top-full mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 min-w-[200px]">
+                    <div className="p-3 border-b border-slate-700">
+                      <h3 className="font-semibold text-white text-sm">League Visibility</h3>
+                      <p className="text-xs text-slate-400 mt-1">Hide leagues to focus on active matchups</p>
+                    </div>
+                    <div className="max-h-60 overflow-y-auto">
+                      {uniqueLeagues.map(league => (
+                        <button
+                          key={league.id}
+                          onClick={() => toggleLeagueVisibility(league.id)}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors flex items-center justify-between group"
+                        >
+                          <span className="text-sm text-white truncate">{league.name}</span>
+                          <div className={`w-4 h-4 rounded border ${
+                            hiddenLeagues.has(league.id)
+                              ? 'bg-slate-600 border-slate-500'
+                              : 'bg-blue-500 border-blue-400'
+                          } flex items-center justify-center`}>
+                            {!hiddenLeagues.has(league.id) && (
+                              <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                      {uniqueLeagues.length === 0 && (
+                        <div className="px-3 py-4 text-center text-slate-400 text-sm">
+                          No leagues found
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
               <button
                 onClick={() => setShowGameConfig(true)}
                 className="btn btn-secondary"
@@ -558,9 +753,9 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                                 (e.target as HTMLImageElement).style.display = 'none'
                               }}
                             />
-                            <div className="font-medium text-white text-sm">
+                            <div className="font-bold text-white text-lg">
                               {player.jerseyNumber && (
-                                <span className="text-slate-400 font-normal text-xs">#{player.jerseyNumber} </span>
+                                <span className="text-slate-300 font-bold text-lg">#{player.jerseyNumber} </span>
                               )}
                               {player.name}
                             </div>
@@ -599,9 +794,9 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                                 (e.target as HTMLImageElement).style.display = 'none'
                               }}
                             />
-                            <div className="font-medium text-white text-sm">
+                            <div className="font-bold text-white text-lg">
                               {player.jerseyNumber && (
-                                <span className="text-slate-400 font-normal text-xs">#{player.jerseyNumber} </span>
+                                <span className="text-slate-300 font-bold text-lg">#{player.jerseyNumber} </span>
                               )}
                               {player.name}
                             </div>
@@ -640,9 +835,9 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                                 (e.target as HTMLImageElement).style.display = 'none'
                               }}
                             />
-                            <div className="font-medium text-white text-sm">
+                            <div className="font-bold text-white text-lg">
                               {player.jerseyNumber && (
-                                <span className="text-slate-400 font-normal text-xs">#{player.jerseyNumber} </span>
+                                <span className="text-slate-300 font-bold text-lg">#{player.jerseyNumber} </span>
                               )}
                               {player.name}
                             </div>
@@ -681,9 +876,9 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                                 (e.target as HTMLImageElement).style.display = 'none'
                               }}
                             />
-                            <div className="font-medium text-white text-sm">
+                            <div className="font-bold text-white text-lg">
                               {player.jerseyNumber && (
-                                <span className="text-slate-400 font-normal text-xs">#{player.jerseyNumber} </span>
+                                <span className="text-slate-300 font-bold text-lg">#{player.jerseyNumber} </span>
                               )}
                               {player.name}
                             </div>
