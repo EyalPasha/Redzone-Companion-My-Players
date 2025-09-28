@@ -745,8 +745,11 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                       <div key={`${player.playerId}-away-mine`} className="bg-slate-700/30 border border-slate-600/50 p-2 rounded hover:bg-slate-700/50 transition-colors">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <img 
-                              src={`https://sleepercdn.com/content/nfl/players/${player.playerId}.jpg`} 
+                            <img
+                              src={player.position === 'DEF' || player.name.includes('Defense')
+                                ? `https://sleepercdn.com/images/team_logos/nfl/${player.team.toLowerCase()}.png`
+                                : `https://sleepercdn.com/content/nfl/players/${player.playerId}.jpg`
+                              }
                               alt={player.name}
                               className="w-6 h-6 rounded-full object-cover bg-slate-600 flex-shrink-0"
                               onError={(e) => {
@@ -757,7 +760,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                               {player.jerseyNumber && (
                                 <span className="text-slate-300 font-bold text-lg">#{player.jerseyNumber} </span>
                               )}
-                              {player.name}
+                              {player.name.length > 15 ? player.name.split(' ').pop() || player.name : player.name}
                             </div>
                           </div>
                           <div className="text-xs text-slate-400 font-medium">{player.position}</div>
@@ -786,8 +789,11 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                       <div key={`${player.playerId}-away-opp`} className="bg-slate-700/30 border border-slate-600/50 p-2 rounded hover:bg-slate-700/50 transition-colors">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <img 
-                              src={`https://sleepercdn.com/content/nfl/players/${player.playerId}.jpg`} 
+                            <img
+                              src={player.position === 'DEF' || player.name.includes('Defense')
+                                ? `https://sleepercdn.com/images/team_logos/nfl/${player.team.toLowerCase()}.png`
+                                : `https://sleepercdn.com/content/nfl/players/${player.playerId}.jpg`
+                              }
                               alt={player.name}
                               className="w-6 h-6 rounded-full object-cover bg-slate-600 flex-shrink-0"
                               onError={(e) => {
@@ -798,7 +804,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                               {player.jerseyNumber && (
                                 <span className="text-slate-300 font-bold text-lg">#{player.jerseyNumber} </span>
                               )}
-                              {player.name}
+{player.name.length > 15 ? player.name.split(' ').pop() || player.name : player.name}
                             </div>
                           </div>
                           <div className="text-xs text-slate-400 font-medium">{player.position}</div>
@@ -827,8 +833,11 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                       <div key={`${player.playerId}-home-mine`} className="bg-slate-700/30 border border-slate-600/50 p-2 rounded hover:bg-slate-700/50 transition-colors">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <img 
-                              src={`https://sleepercdn.com/content/nfl/players/${player.playerId}.jpg`} 
+                            <img
+                              src={player.position === 'DEF' || player.name.includes('Defense')
+                                ? `https://sleepercdn.com/images/team_logos/nfl/${player.team.toLowerCase()}.png`
+                                : `https://sleepercdn.com/content/nfl/players/${player.playerId}.jpg`
+                              }
                               alt={player.name}
                               className="w-6 h-6 rounded-full object-cover bg-slate-600 flex-shrink-0"
                               onError={(e) => {
@@ -839,7 +848,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                               {player.jerseyNumber && (
                                 <span className="text-slate-300 font-bold text-lg">#{player.jerseyNumber} </span>
                               )}
-                              {player.name}
+{player.name.length > 15 ? player.name.split(' ').pop() || player.name : player.name}
                             </div>
                           </div>
                           <div className="text-xs text-slate-400 font-medium">{player.position}</div>
@@ -868,8 +877,11 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                       <div key={`${player.playerId}-home-opp`} className="bg-slate-700/30 border border-slate-600/50 p-2 rounded hover:bg-slate-700/50 transition-colors">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <img 
-                              src={`https://sleepercdn.com/content/nfl/players/${player.playerId}.jpg`} 
+                            <img
+                              src={player.position === 'DEF' || player.name.includes('Defense')
+                                ? `https://sleepercdn.com/images/team_logos/nfl/${player.team.toLowerCase()}.png`
+                                : `https://sleepercdn.com/content/nfl/players/${player.playerId}.jpg`
+                              }
                               alt={player.name}
                               className="w-6 h-6 rounded-full object-cover bg-slate-600 flex-shrink-0"
                               onError={(e) => {
@@ -880,7 +892,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                               {player.jerseyNumber && (
                                 <span className="text-slate-300 font-bold text-lg">#{player.jerseyNumber} </span>
                               )}
-                              {player.name}
+{player.name.length > 15 ? player.name.split(' ').pop() || player.name : player.name}
                             </div>
                           </div>
                           <div className="text-xs text-slate-400 font-medium">{player.position}</div>
