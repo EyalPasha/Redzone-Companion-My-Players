@@ -7,12 +7,13 @@ import { storage } from '@/lib/storage'
 import AuthForm from '@/components/AuthForm'
 import Dashboard from '@/components/Dashboard'
 import RedZoneView from '@/components/RedZoneView'
+import AllLeaguesView from '@/components/AllLeaguesView'
 import Image from 'next/image'
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [currentView, setCurrentView] = useState<'dashboard' | 'redzone'>(
+  const [currentView, setCurrentView] = useState<'dashboard' | 'redzone' | 'allleagues'>(
     typeof window !== 'undefined' ? (storage.getCurrentView() || 'dashboard') : 'dashboard'
   )
 
@@ -88,13 +89,24 @@ export default function Home() {
     }} />
   }
 
+  if (currentView === 'allleagues') {
+    return <AllLeaguesView user={user} onBackToDashboard={() => {
+      setCurrentView('dashboard')
+      storage.setCurrentView('dashboard')
+    }} />
+  }
+
   return (
-    <Dashboard 
-      user={user} 
+    <Dashboard
+      user={user}
       onLogout={handleLogout}
       onStartRedZoneSession={() => {
         setCurrentView('redzone')
         storage.setCurrentView('redzone')
+      }}
+      onViewAllLeagues={() => {
+        setCurrentView('allleagues')
+        storage.setCurrentView('allleagues')
       }}
     />
   )

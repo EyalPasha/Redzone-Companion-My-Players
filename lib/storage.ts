@@ -215,11 +215,11 @@ export const storage = {
     storage.set(STORAGE_KEYS.CURRENT_WEEK, week)
   },
 
-  getCurrentView: (): 'dashboard' | 'redzone' | null => {
+  getCurrentView: (): 'dashboard' | 'redzone' | 'allleagues' | null => {
     return storage.get(STORAGE_KEYS.CURRENT_VIEW)
   },
 
-  setCurrentView: (view: 'dashboard' | 'redzone') => {
+  setCurrentView: (view: 'dashboard' | 'redzone' | 'allleagues') => {
     storage.set(STORAGE_KEYS.CURRENT_VIEW, view)
   },
 

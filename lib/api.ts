@@ -112,6 +112,7 @@ export const fetchFilteredCurrentWeekGames = async () => {
 
     // Apply 6-hour delay logic for week transition
     const previousWeekGames = scoreboard.events.filter(game => game.week?.number === (sleeperWeek - 1))
+
     if (previousWeekGames.length > 0) {
       const latestPreviousGame = previousWeekGames.reduce((latest, game) =>
         new Date(game.date) > new Date(latest.date) ? game : latest

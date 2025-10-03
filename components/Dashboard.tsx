@@ -13,9 +13,10 @@ interface DashboardProps {
   user: User
   onLogout: () => void
   onStartRedZoneSession: () => void
+  onViewAllLeagues: () => void
 }
 
-export default function Dashboard({ user, onLogout, onStartRedZoneSession }: DashboardProps) {
+export default function Dashboard({ user, onLogout, onStartRedZoneSession, onViewAllLeagues }: DashboardProps) {
   const [leagues, setLeagues] = useState<UserLeague[]>([])
   const [newLeagueId, setNewLeagueId] = useState('')
   const [newLeagueNickname, setNewLeagueNickname] = useState('')
@@ -308,18 +309,31 @@ export default function Dashboard({ user, onLogout, onStartRedZoneSession }: Das
           )}
         </div>
 
-        {/* Start Session Button */}
+        {/* Action Buttons */}
         {leagues.length > 0 && (
-          <div className="mt-12 text-center">
-            <button 
-              onClick={onStartRedZoneSession}
-              className="btn btn-success px-12 py-4 text-xl font-semibold"
-            >
-              Start RedZone Session
-            </button>
-            <p className="text-sm text-slate-400 mt-4">
-              Launch the main interface to track your players during games
-            </p>
+          <div className="mt-12 text-center space-y-6">
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              <button
+                onClick={onStartRedZoneSession}
+                className="btn btn-success px-12 py-4 text-xl font-semibold"
+              >
+                Start RedZone Session
+              </button>
+              <button
+                onClick={onViewAllLeagues}
+                className="btn btn-primary px-8 py-3 text-lg font-medium"
+              >
+                View All Lineups
+              </button>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm text-slate-400">
+                RedZone Session: Track players during live games
+              </p>
+              <p className="text-sm text-slate-400">
+                View All Lineups: See current lineups across all your leagues
+              </p>
+            </div>
           </div>
         )}
 

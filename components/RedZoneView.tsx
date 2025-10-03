@@ -89,12 +89,18 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
           continue
         }
 
+        // Find user's matchup to see if it has different starters
+        const userMatchup = matchups.find(m => m.roster_id === userRoster.roster_id)
+
         // Find opponent's roster
         const opponentRoster = findOpponentRoster(rosters, matchups, userRoster.roster_id)
 
+        // Always use matchup starters when available (more current than roster)
+        const actualUserStarters = userMatchup?.starters || userRoster.starters
+
         // Add user's starters to lineup
-        if (userRoster.starters) {
-          for (const playerId of userRoster.starters) {
+        if (actualUserStarters) {
+          for (const playerId of actualUserStarters) {
             if (playerId && players[playerId]) {
               const player = players[playerId]
               const playerData = {
@@ -109,7 +115,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
               }
 
               // Check if player already exists in lineup
-              const existingPlayerIndex = allLineups.findIndex(p => 
+              const existingPlayerIndex = allLineups.findIndex(p =>
                 p.playerId === playerId && p.isOpponent === false && p.team === playerData.team
               )
 
@@ -129,9 +135,17 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
           }
         }
 
+        // Find opponent's matchup for more accurate starters
+        const opponentMatchup = userMatchup ? matchups.find(m =>
+          m.matchup_id === userMatchup.matchup_id && m.roster_id !== userRoster.roster_id
+        ) : null
+
+        // Always use opponent matchup starters when available (more current than roster)
+        const actualOpponentStarters = opponentMatchup?.starters || opponentRoster?.starters
+
         // Add opponent's starters to lineup
-        if (opponentRoster && opponentRoster.starters) {
-          for (const playerId of opponentRoster.starters) {
+        if (actualOpponentStarters) {
+          for (const playerId of actualOpponentStarters) {
             if (playerId && players[playerId]) {
               const player = players[playerId]
               const playerData = {
@@ -146,7 +160,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
               }
 
               // Check if player already exists in lineup
-              const existingPlayerIndex = allLineups.findIndex(p => 
+              const existingPlayerIndex = allLineups.findIndex(p =>
                 p.playerId === playerId && p.isOpponent === true && p.team === playerData.team
               )
 
@@ -168,10 +182,10 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
       }
 
       setPlayerLineups(allLineups)
-      
+
       // Cache the lineups
       storage.setPlayerLineups(allLineups)
-      
+
       // Create compact player cache with only needed players
       const allPlayerIds = Array.from(new Set(allLineups.map(p => p.playerId)))
       storage.setCompactSleeperPlayers(players, allPlayerIds)
