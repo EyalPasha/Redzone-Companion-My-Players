@@ -465,45 +465,58 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
       player.leagueIds.some(leagueId => !hiddenLeagues.has(leagueId))
     )
 
-    // Process each visible player once and group by team
+    // Helper to normalize team names/abbreviations
+    const normalizeTeam = (team: string) => {
+      if (!team) return team;
+      const t = team.trim().toUpperCase();
+      if (t === 'WASHINGTON COMMANDERS' || t === 'WASHINGTON FOOTBALL TEAM' || t === 'WAS' || t === 'WSH') return 'WSH';
+      return t;
+    };
+
+    // ...
+
+    // Process each visible player once and group by normalized team
     for (const player of visiblePlayers) {
       // Filter out hidden leagues from the player's data
       const visibleLeagueIndices = player.leagueIds
         .map((leagueId, index) => ({ leagueId, index }))
-        .filter(({ leagueId }) => !hiddenLeagues.has(leagueId))
+        .filter(({ leagueId }) => !hiddenLeagues.has(leagueId));
 
       const filteredPlayer = {
         ...player,
         leagueIds: visibleLeagueIndices.map(({ leagueId }) => leagueId),
         leagueNames: visibleLeagueIndices.map(({ index }) => player.leagueNames[index])
+      };
+
+      const normalizedTeam = normalizeTeam(player.team);
+      if (!teamPlayerMap.has(normalizedTeam)) {
+        teamPlayerMap.set(normalizedTeam, { myPlayers: [], opponents: [] });
       }
 
-      if (!teamPlayerMap.has(player.team)) {
-        teamPlayerMap.set(player.team, { myPlayers: [], opponents: [] })
-      }
-
-      const teamData = teamPlayerMap.get(player.team)!
+      const teamData = teamPlayerMap.get(normalizedTeam)!;
       if (player.isOpponent) {
-        teamData.opponents.push(filteredPlayer)
+        teamData.opponents.push(filteredPlayer);
       } else {
-        teamData.myPlayers.push(filteredPlayer)
+        teamData.myPlayers.push(filteredPlayer);
       }
     }
 
+    // ...
+
     // Return optimized lookup function
     return (game: ESPNGame) => {
-      if (!game.competitions[0]) return { homeTeam: { myPlayers: [], opponents: [] }, awayTeam: { myPlayers: [], opponents: [] } }
+      if (!game.competitions[0]) return { homeTeam: { myPlayers: [], opponents: [] }, awayTeam: { myPlayers: [], opponents: [] } };
 
-      const homeTeam = game.competitions[0].competitors.find(c => c.homeAway === 'home')
-      const awayTeam = game.competitions[0].competitors.find(c => c.homeAway === 'away')
+      const homeTeam = game.competitions[0].competitors.find(c => c.homeAway === 'home');
+      const awayTeam = game.competitions[0].competitors.find(c => c.homeAway === 'away');
 
-      const homeTeamAbbr = homeTeam?.team.abbreviation || ''
-      const awayTeamAbbr = awayTeam?.team.abbreviation || ''
+      const homeTeamAbbr = homeTeam?.team.abbreviation || '';
+      const awayTeamAbbr = awayTeam?.team.abbreviation || '';
 
       return {
         homeTeam: teamPlayerMap.get(homeTeamAbbr) || { myPlayers: [], opponents: [] },
         awayTeam: teamPlayerMap.get(awayTeamAbbr) || { myPlayers: [], opponents: [] }
-      }
+      };
     }
   }, [playerLineups, hiddenLeagues])
 
