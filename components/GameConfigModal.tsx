@@ -18,6 +18,17 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
   const [windowFilter, setWindowFilter] = useState<WindowFilter>('all')
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  useEffect(() => {
     // Initialize config with all games
     const initialConfig = games.map((game, index) => {
       const existingConfig = gameConfig.find(c => c.gameId === game.id)
@@ -120,17 +131,17 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="card max-w-5xl w-full mx-4 max-h-[90vh] overflow-y-auto p-4">
+      <div className="card max-w-5xl w-full mx-4 max-h-[90vh] overflow-y-auto p-4" role="dialog" aria-modal="true" aria-labelledby="game-config-title">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-white">Configure Games</h2>
+          <h2 id="game-config-title" className="text-xl font-semibold text-white">Configure Games</h2>
           <div className="flex gap-3">
-            <button onClick={resetToDefault} className="btn btn-secondary text-sm">
+            <button type="button" onClick={resetToDefault} className="btn btn-secondary text-sm">
               Reset All
             </button>
-            <button onClick={onClose} className="btn btn-secondary text-sm">
+            <button type="button" onClick={onClose} className="btn btn-secondary text-sm">
               Cancel
             </button>
-            <button onClick={handleSave} className="btn btn-primary text-sm">
+            <button type="button" onClick={handleSave} className="btn btn-primary text-sm">
               Save Configuration
             </button>
           </div>
@@ -139,7 +150,9 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
         {/* Window Filter Buttons */}
         <div className="flex gap-2 mb-4">
           <button
+            type="button"
             onClick={() => applyWindowFilter('all')}
+            aria-pressed={windowFilter === 'all'}
             className={`btn text-sm px-4 py-2 ${
               windowFilter === 'all' ? 'btn-primary' : 'btn-secondary'
             }`}
@@ -147,7 +160,9 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
             Show All
           </button>
           <button
+            type="button"
             onClick={() => applyWindowFilter('early')}
+            aria-pressed={windowFilter === 'early'}
             className={`btn text-sm px-4 py-2 ${
               windowFilter === 'early' ? 'btn-primary' : 'btn-secondary'
             }`}
@@ -155,7 +170,9 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
             Early Window
           </button>
           <button
+            type="button"
             onClick={() => applyWindowFilter('late')}
+            aria-pressed={windowFilter === 'late'}
             className={`btn text-sm px-4 py-2 ${
               windowFilter === 'late' ? 'btn-primary' : 'btn-secondary'
             }`}
@@ -163,7 +180,9 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
             Late Window
           </button>
           <button
+            type="button"
             onClick={() => applyWindowFilter('early+late')}
+            aria-pressed={windowFilter === 'early+late'}
             className={`btn text-sm px-4 py-2 ${
               windowFilter === 'early+late' ? 'btn-primary' : 'btn-secondary'
             }`}
@@ -174,7 +193,7 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
 
         {/* Compact Grid View */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {config.map((gameConfig, index) => {
+          {config.map((gameConfig) => {
             const { homeTeam, awayTeam, time } = getGameInfo(gameConfig.gameId)
             const game = games.find(g => g.id === gameConfig.gameId)
             const isEarly = game ? isEarlyWindow(game) : false
@@ -183,7 +202,10 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
             return (
               <button
                 key={gameConfig.gameId}
+                type="button"
                 onClick={() => toggleGameVisibility(gameConfig.gameId)}
+                aria-pressed={gameConfig.isVisible}
+                aria-label={`${awayTeam} at ${homeTeam}, ${gameConfig.isVisible ? 'visible' : 'hidden'}`}
                 className={`p-3 rounded-lg border-2 text-left transition-all h-[110px] flex flex-col ${
                   gameConfig.isVisible
                     ? 'bg-slate-700/50 border-green-500/50 shadow-lg'
@@ -193,7 +215,7 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
                 {/* Header with order number and time */}
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs font-mono text-slate-400">
-                    #{gameConfig.isVisible ? config.filter(c => c.isVisible).findIndex(c => c.gameId === gameConfig.gameId) + 1 : '—'}
+                    {gameConfig.isVisible ? `#${config.filter(c => c.isVisible).findIndex(c => c.gameId === gameConfig.gameId) + 1}` : 'Off'}
                   </div>
                   <div className="text-xs text-slate-500">{time}</div>
                 </div>
@@ -240,7 +262,7 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
                   <div className={`text-xs font-medium leading-none ${
                     gameConfig.isVisible ? 'text-green-300' : 'text-red-300'
                   }`}>
-                    {gameConfig.isVisible ? '✓' : '✗'}
+                    {gameConfig.isVisible ? 'On' : 'Off'}
                   </div>
                 </div>
               </button>

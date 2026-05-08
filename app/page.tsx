@@ -1,46 +1,83 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { User } from '@supabase/supabase-js'
+import { Session, User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { storage } from '@/lib/storage'
 import AuthForm from '@/components/AuthForm'
 import Dashboard from '@/components/Dashboard'
 import RedZoneView from '@/components/RedZoneView'
 import AllLeaguesView from '@/components/AllLeaguesView'
+import AppShell, { type AppView } from '@/components/AppShell'
 import Image from 'next/image'
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [currentView, setCurrentView] = useState<'dashboard' | 'redzone' | 'allleagues'>(
+  const [currentView, setCurrentView] = useState<AppView>(
     typeof window !== 'undefined' ? (storage.getCurrentView() || 'dashboard') : 'dashboard'
   )
 
   useEffect(() => {
+    let isMounted = true
+
+    const applySession = (session: Session | null) => {
+      if (!isMounted) return
+
+      const nextUser = session?.user ?? null
+      const nextUserId = nextUser?.id ?? null
+      const cachedUserId = storage.getActiveUserId()
+
+      if (nextUserId && cachedUserId !== nextUserId) {
+        storage.clearCache()
+        setCurrentView('dashboard')
+        storage.setActiveUserId(nextUserId)
+      }
+
+      if (!nextUserId) {
+        storage.clearCache()
+        setCurrentView('dashboard')
+      } else if (cachedUserId === nextUserId) {
+        storage.setActiveUserId(nextUserId)
+      }
+
+      setUser(nextUser)
+    }
+
     // Get initial session
     const getSession = async () => {
       const { data: { session } } = await supabase.auth.getSession()
-      setUser(session?.user ?? null)
-      setLoading(false)
+      applySession(session)
+
+      if (isMounted) {
+        setLoading(false)
+      }
     }
 
     getSession()
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setUser(session?.user ?? null)
+      (_event, session) => {
+        applySession(session)
       }
     )
 
-    return () => subscription.unsubscribe()
+    return () => {
+      isMounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    storage.clearCache()
     setCurrentView('dashboard')
-    storage.setCurrentView('dashboard')
+    await supabase.auth.signOut()
+  }
+
+  const handleNavigate = (view: AppView) => {
+    setCurrentView(view)
+    storage.setCurrentView(view)
   }
 
   if (loading) {
@@ -82,32 +119,26 @@ export default function Home() {
     )
   }
 
-  if (currentView === 'redzone') {
-    return <RedZoneView user={user} onBackToDashboard={() => {
-      setCurrentView('dashboard')
-      storage.setCurrentView('dashboard')
-    }} />
-  }
-
-  if (currentView === 'allleagues') {
-    return <AllLeaguesView user={user} onBackToDashboard={() => {
-      setCurrentView('dashboard')
-      storage.setCurrentView('dashboard')
-    }} />
-  }
+  const activeView = currentView === 'redzone'
+    ? <RedZoneView user={user} onBackToDashboard={() => handleNavigate('dashboard')} />
+    : currentView === 'allleagues'
+      ? <AllLeaguesView user={user} onBackToDashboard={() => handleNavigate('dashboard')} />
+      : (
+        <Dashboard
+          user={user}
+          onStartRedZoneSession={() => handleNavigate('redzone')}
+          onViewAllLeagues={() => handleNavigate('allleagues')}
+        />
+      )
 
   return (
-    <Dashboard
+    <AppShell
       user={user}
+      currentView={currentView}
+      onNavigate={handleNavigate}
       onLogout={handleLogout}
-      onStartRedZoneSession={() => {
-        setCurrentView('redzone')
-        storage.setCurrentView('redzone')
-      }}
-      onViewAllLeagues={() => {
-        setCurrentView('allleagues')
-        storage.setCurrentView('allleagues')
-      }}
-    />
+    >
+      {activeView}
+    </AppShell>
   )
 }

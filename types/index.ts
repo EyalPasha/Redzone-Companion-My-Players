@@ -14,6 +14,7 @@ export interface SleeperUser {
   user_id: string
   display_name: string
   avatar?: string
+  email?: string
 }
 
 export interface SleeperRoster {
@@ -33,6 +34,16 @@ export interface SleeperMatchup {
   starters: string[]
   players_points?: Record<string, number>
 }
+
+export interface SleeperPlayer {
+  first_name?: string
+  last_name?: string
+  position?: string
+  team?: string
+  number?: number | string
+}
+
+export type SleeperPlayers = Record<string, SleeperPlayer>
 
 // ESPN API Types
 export interface ESPNGame {
@@ -104,7 +115,7 @@ export interface ESPNGame {
         logo: string
       }
       score: string
-      statistics: any[]
+      statistics: unknown[]
       records: Array<{
         name: string
         abbreviation: string
@@ -112,7 +123,7 @@ export interface ESPNGame {
         summary: string
       }>
     }]
-    notes: any[]
+    notes: unknown[]
     status: {
       clock: number
       displayClock: string

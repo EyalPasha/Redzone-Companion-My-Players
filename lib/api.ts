@@ -1,17 +1,58 @@
-import { ESPNScoreboard, SleeperMatchup, SleeperRoster, SleeperUser } from '@/types'
+import { ESPNScoreboard, SleeperLeague, SleeperMatchup, SleeperPlayers, SleeperRoster, SleeperUser } from '@/types'
+import { isAbortError } from '@/lib/errors'
+
+const SLEEPER_LEAGUE_ID_PATTERN = /^\d+$/
+
+interface SleeperNFLState {
+  week?: number
+  season?: string
+  season_type?: string
+}
+
+const fetchJson = async <T>(url: string, errorLabel: string, signal?: AbortSignal): Promise<T> => {
+  const response = await fetch(url, {
+    signal,
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`${errorLabel}: ${response.status}`)
+  }
+
+  return response.json() as Promise<T>
+}
+
+export const isSleeperLeagueId = (leagueId: string): boolean => {
+  return SLEEPER_LEAGUE_ID_PATTERN.test(leagueId.trim())
+}
+
+const normalizeSleeperLeagueId = (leagueId: string): string => {
+  const trimmedLeagueId = leagueId.trim()
+
+  if (!isSleeperLeagueId(trimmedLeagueId)) {
+    throw new Error('Sleeper league ID must contain only numbers.')
+  }
+
+  return encodeURIComponent(trimmedLeagueId)
+}
+
+const normalizeWeek = (week: number): number => {
+  if (!Number.isInteger(week) || week < 1 || week > 30) {
+    throw new Error('NFL week must be a number between 1 and 30.')
+  }
+
+  return week
+}
 
 // ESPN API Functions
-export const fetchCurrentWeekGames = async (): Promise<ESPNScoreboard> => {
-  try {
-    const response = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard')
-    if (!response.ok) {
-      throw new Error(`ESPN API error: ${response.status}`)
-    }
-    return await response.json()
-  } catch (error) {
-    console.error('Error fetching ESPN games:', error)
-    throw error
-  }
+export const fetchCurrentWeekGames = async (signal?: AbortSignal): Promise<ESPNScoreboard> => {
+  return fetchJson<ESPNScoreboard>(
+    'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard',
+    'ESPN API error',
+    signal
+  )
 }
 
 // Cache for week calculation to avoid repeated expensive operations
@@ -19,7 +60,7 @@ let weekCalculationCache: { timestamp: number, week: number } | null = null
 const WEEK_CACHE_DURATION = 10 * 60 * 1000 // 10 minutes
 
 // Calculate the effective current week with 6-hour delay after last game
-export const getEffectiveCurrentWeek = async () => {
+export const getEffectiveCurrentWeek = async (signal?: AbortSignal) => {
   try {
     // Check cache first
     const now = Date.now()
@@ -29,8 +70,8 @@ export const getEffectiveCurrentWeek = async () => {
 
     // Get both sources of truth
     const [nflState, scoreboard] = await Promise.all([
-      fetchSleeperNFLState(),
-      fetchCurrentWeekGames()
+      fetchSleeperNFLState(signal),
+      fetchCurrentWeekGames(signal)
     ])
 
     const sleeperWeek = nflState.week || 1
@@ -69,9 +110,13 @@ export const getEffectiveCurrentWeek = async () => {
     return effectiveWeek
 
   } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+
     console.error('Error calculating effective current week:', error)
     // Fallback to Sleeper's current week
-    const nflState = await fetchSleeperNFLState()
+    const nflState = await fetchSleeperNFLState(signal)
     const fallbackWeek = nflState.week || 1
     weekCalculationCache = { timestamp: Date.now(), week: fallbackWeek }
     return fallbackWeek
@@ -79,12 +124,12 @@ export const getEffectiveCurrentWeek = async () => {
 }
 
 // Optimized function that calculates week and filters games in one go
-export const fetchFilteredCurrentWeekGames = async () => {
+export const fetchFilteredCurrentWeekGames = async (signal?: AbortSignal) => {
   try {
     // Check cache first
     const now = Date.now()
     if (weekCalculationCache && (now - weekCalculationCache.timestamp) < WEEK_CACHE_DURATION) {
-      const scoreboard = await fetchCurrentWeekGames()
+      const scoreboard = await fetchCurrentWeekGames(signal)
       const effectiveWeek = weekCalculationCache.week
       const filteredEvents = scoreboard.events.filter(game => game.week?.number === effectiveWeek)
 
@@ -97,8 +142,8 @@ export const fetchFilteredCurrentWeekGames = async () => {
 
     // Get both sources of truth in parallel
     const [nflState, scoreboard] = await Promise.all([
-      fetchSleeperNFLState(),
-      fetchCurrentWeekGames()
+      fetchSleeperNFLState(signal),
+      fetchCurrentWeekGames(signal)
     ])
 
     const sleeperWeek = nflState.week || 1
@@ -138,88 +183,67 @@ export const fetchFilteredCurrentWeekGames = async () => {
       events: filteredEvents.length > 0 ? filteredEvents : scoreboard.events
     }
   } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+
     console.error('Error fetching filtered current week games:', error)
     throw error
   }
 }
 
 // Sleeper API Functions
-export const fetchSleeperNFLState = async () => {
-  try {
-    const response = await fetch('https://api.sleeper.app/v1/state/nfl')
-    if (!response.ok) {
-      throw new Error(`Sleeper state API error: ${response.status}`)
-    }
-    return await response.json()
-  } catch (error) {
-    console.error('Error fetching Sleeper NFL state:', error)
-    throw error
-  }
+export const fetchSleeperNFLState = async (signal?: AbortSignal): Promise<SleeperNFLState> => {
+  return fetchJson<SleeperNFLState>(
+    'https://api.sleeper.app/v1/state/nfl',
+    'Sleeper state API error',
+    signal
+  )
 }
 
-export const fetchSleeperLeagueUsers = async (leagueId: string): Promise<SleeperUser[]> => {
-  try {
-    const response = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`)
-    if (!response.ok) {
-      throw new Error(`Sleeper users API error: ${response.status}`)
-    }
-    return await response.json()
-  } catch (error) {
-    console.error(`Error fetching Sleeper league users for ${leagueId}:`, error)
-    throw error
-  }
+export const fetchSleeperLeagueUsers = async (leagueId: string, signal?: AbortSignal): Promise<SleeperUser[]> => {
+  const normalizedLeagueId = normalizeSleeperLeagueId(leagueId)
+  return fetchJson<SleeperUser[]>(
+    `https://api.sleeper.app/v1/league/${normalizedLeagueId}/users`,
+    'Sleeper users API error',
+    signal
+  )
 }
 
-export const fetchSleeperLeagueRosters = async (leagueId: string): Promise<SleeperRoster[]> => {
-  try {
-    const response = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`)
-    if (!response.ok) {
-      throw new Error(`Sleeper rosters API error: ${response.status}`)
-    }
-    return await response.json()
-  } catch (error) {
-    console.error(`Error fetching Sleeper league rosters for ${leagueId}:`, error)
-    throw error
-  }
+export const fetchSleeperLeagueRosters = async (leagueId: string, signal?: AbortSignal): Promise<SleeperRoster[]> => {
+  const normalizedLeagueId = normalizeSleeperLeagueId(leagueId)
+  return fetchJson<SleeperRoster[]>(
+    `https://api.sleeper.app/v1/league/${normalizedLeagueId}/rosters`,
+    'Sleeper rosters API error',
+    signal
+  )
 }
 
-export const fetchSleeperMatchups = async (leagueId: string, week: number): Promise<SleeperMatchup[]> => {
-  try {
-    const response = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${week}`)
-    if (!response.ok) {
-      throw new Error(`Sleeper matchups API error: ${response.status}`)
-    }
-    return await response.json()
-  } catch (error) {
-    console.error(`Error fetching Sleeper matchups for ${leagueId}, week ${week}:`, error)
-    throw error
-  }
+export const fetchSleeperMatchups = async (leagueId: string, week: number, signal?: AbortSignal): Promise<SleeperMatchup[]> => {
+  const normalizedLeagueId = normalizeSleeperLeagueId(leagueId)
+  const normalizedWeek = normalizeWeek(week)
+  return fetchJson<SleeperMatchup[]>(
+    `https://api.sleeper.app/v1/league/${normalizedLeagueId}/matchups/${normalizedWeek}`,
+    'Sleeper matchups API error',
+    signal
+  )
 }
 
-export const fetchSleeperPlayers = async (): Promise<Record<string, any>> => {
-  try {
-    const response = await fetch('https://api.sleeper.app/v1/players/nfl')
-    if (!response.ok) {
-      throw new Error(`Sleeper players API error: ${response.status}`)
-    }
-    return await response.json()
-  } catch (error) {
-    console.error('Error fetching Sleeper players:', error)
-    throw error
-  }
+export const fetchSleeperPlayers = async (signal?: AbortSignal): Promise<SleeperPlayers> => {
+  return fetchJson<SleeperPlayers>(
+    'https://api.sleeper.app/v1/players/nfl',
+    'Sleeper players API error',
+    signal
+  )
 }
 
-export const fetchSleeperLeague = async (leagueId: string): Promise<any> => {
-  try {
-    const response = await fetch(`https://api.sleeper.app/v1/league/${leagueId}`)
-    if (!response.ok) {
-      throw new Error(`Sleeper league API error: ${response.status}`)
-    }
-    return await response.json()
-  } catch (error) {
-    console.error(`Error fetching Sleeper league ${leagueId}:`, error)
-    throw error
-  }
+export const fetchSleeperLeague = async (leagueId: string, signal?: AbortSignal): Promise<SleeperLeague> => {
+  const normalizedLeagueId = normalizeSleeperLeagueId(leagueId)
+  return fetchJson<SleeperLeague>(
+    `https://api.sleeper.app/v1/league/${normalizedLeagueId}`,
+    'Sleeper league API error',
+    signal
+  )
 }
 
 // Helper function to find user's roster in a league by Sleeper user ID
@@ -233,7 +257,7 @@ export const findSleeperUserByEmail = (users: SleeperUser[], email: string): Sle
   return users.find(user => 
     user.user_id && (
       // Some users might have email in metadata (not always available)
-      (user as any).email === email ||
+      user.email === email ||
       // Or try display_name matching email
       user.display_name?.toLowerCase() === email.toLowerCase()
     )

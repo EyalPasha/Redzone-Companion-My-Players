@@ -11,7 +11,10 @@ export const metadata: Metadata = {
   title: 'RedZone Companion',
   description: 'Track your fantasy players across multiple leagues during RedZone',
   icons: {
-    icon: '/icon.png',
+    icon: [
+      { url: '/icon.png', type: 'image/png' },
+      { url: '/favicon.ico', type: 'image/x-icon' },
+    ],
     shortcut: '/icon.png',
     apple: '/icon.png',
   },

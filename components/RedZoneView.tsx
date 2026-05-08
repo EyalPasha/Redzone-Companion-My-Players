@@ -1,20 +1,20 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, memo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import {
   fetchFilteredCurrentWeekGames,
-  fetchSleeperNFLState,
   fetchSleeperLeagueRosters,
-  fetchSleeperLeagueUsers,
   fetchSleeperMatchups,
   fetchSleeperPlayers,
   findUserRoster,
   findOpponentRoster
 } from '@/lib/api'
-import { ESPNGame, UserLeague, PlayerLineup, SleeperRoster, SleeperUser, SleeperMatchup } from '@/types'
+import { ESPNGame, UserLeague, PlayerLineup, SleeperPlayers } from '@/types'
 import { storage, GameConfig } from '@/lib/storage'
+import { getErrorMessage, isAbortError } from '@/lib/errors'
+import { getSleeperPlayerName } from '@/lib/players'
 import GameConfigModal from './GameConfigModal'
 
 interface RedZoneViewProps {
@@ -23,32 +23,34 @@ interface RedZoneViewProps {
 }
 
 export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProps) {
-  const [games, setGames] = useState<ESPNGame[]>([])
-  const [selectedGameIndex, setSelectedGameIndex] = useState<number | null>(null)
+  const [games, setGames] = useState<ESPNGame[]>(() => storage.getGames() ?? [])
+  const [selectedGameIndex, setSelectedGameIndex] = useState<number | null>(() => storage.getSelectedGame())
   const [userLeagues, setUserLeagues] = useState<UserLeague[]>([])
-  const [playerLineups, setPlayerLineups] = useState<PlayerLineup[]>([])
+  const [playerLineups, setPlayerLineups] = useState<PlayerLineup[]>(() => storage.getPlayerLineups() ?? [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [currentWeek, setCurrentWeek] = useState(1)
-  const [sleeperPlayers, setSleeperPlayers] = useState<Record<string, any>>({})
-  const [gameConfig, setGameConfig] = useState<GameConfig[]>([])
-  const [filteredGames, setFilteredGames] = useState<ESPNGame[]>([])
+  const [currentWeek, setCurrentWeek] = useState(() => storage.getCurrentWeek() ?? 1)
+  const [gameConfig, setGameConfig] = useState<GameConfig[]>(() => storage.getGameConfig())
   const [showGameConfig, setShowGameConfig] = useState(false)
-  const [message, setMessage] = useState('')
-  const [hiddenLeagues, setHiddenLeagues] = useState<Set<string>>(new Set())
+  const [hiddenLeagues, setHiddenLeagues] = useState<Set<string>>(() => new Set(storage.getHiddenLeagues()))
   const [showLeagueFilter, setShowLeagueFilter] = useState(false)
-  const [showAllLeagues, setShowAllLeagues] = useState(false)
-  const [allLeaguesData, setAllLeaguesData] = useState<Array<{
-    leagueId: string
-    leagueName: string
-    userRoster: { rosterId: number, points: number, projectedPoints: number, owner: string }
-    opponentRoster: { rosterId: number, points: number, projectedPoints: number, owner: string }
-    matchupId: number
-  }>>([])
-  const [allLeaguesLoading, setAllLeaguesLoading] = useState(false)
+  const fetchLeaguesRequestId = useRef(0)
+  const refreshRequestId = useRef(0)
+  const refreshController = useRef<AbortController | null>(null)
+  const isMounted = useRef(true)
   
+  useEffect(() => {
+    return () => {
+      isMounted.current = false
+      fetchLeaguesRequestId.current += 1
+      refreshRequestId.current += 1
+      refreshController.current?.abort()
+    }
+  }, [])
 
-  const fetchUserLeagues = async () => {
+  const fetchUserLeagues = useCallback(async () => {
+    const requestId = ++fetchLeaguesRequestId.current
+
     try {
       const { data, error } = await supabase
         .from('user_leagues')
@@ -56,37 +58,47 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
         .eq('user_id', user.id)
 
       if (error) throw error
+      if (!isMounted.current || requestId !== fetchLeaguesRequestId.current) return
+
       setUserLeagues(data || [])
-    } catch (error: any) {
-      setError('Error fetching leagues: ' + error.message)
+    } catch (error: unknown) {
+      if (!isMounted.current || requestId !== fetchLeaguesRequestId.current) return
+
+      setError('Error fetching leagues: ' + getErrorMessage(error))
     }
-  }
+  }, [user.id])
 
-  const fetchAllLineups = useCallback(async (week: number, players: Record<string, any>) => {
-    const allLineups: PlayerLineup[] = []
+  const fetchAllLineups = useCallback(async (
+    week: number,
+    players: SleeperPlayers,
+    signal?: AbortSignal
+  ): Promise<{ lineups: PlayerLineup[], failureCount: number }> => {
+    type PlayerLineupEntry = Omit<PlayerLineup, 'leagueIds' | 'leagueNames'> & {
+      leagueId: string
+      leagueName: string
+    }
 
-    try {
-      for (const league of userLeagues) {
+    const leagueResults = await Promise.all(userLeagues.map(async (league) => {
+      try {
         const leagueId = league.sleeper_league_id
 
         // Fetch league data in parallel
-        const [rosters, users, matchups] = await Promise.all([
-          fetchSleeperLeagueRosters(leagueId),
-          fetchSleeperLeagueUsers(leagueId),
-          fetchSleeperMatchups(leagueId, week)
+        const [rosters, matchups] = await Promise.all([
+          fetchSleeperLeagueRosters(leagueId, signal),
+          fetchSleeperMatchups(leagueId, week, signal)
         ])
 
         // Find user's roster using stored Sleeper user ID
         const sleeperUserId = league.sleeper_user_id
         if (!sleeperUserId) {
           console.warn(`No Sleeper user ID stored for league ${leagueId}. Please re-add this league with user selection.`)
-          continue
+          return null
         }
 
         const userRoster = findUserRoster(rosters, sleeperUserId)
         if (!userRoster) {
           console.warn(`User roster not found in league ${leagueId} for Sleeper user ${sleeperUserId}`)
-          continue
+          return null
         }
 
         // Find user's matchup to see if it has different starters
@@ -97,40 +109,24 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
 
         // Always use matchup starters when available (more current than roster)
         const actualUserStarters = userMatchup?.starters || userRoster.starters
+        const leagueName = league.custom_nickname || league.league_name || 'League'
+        const entries: PlayerLineupEntry[] = []
 
         // Add user's starters to lineup
         if (actualUserStarters) {
           for (const playerId of actualUserStarters) {
             if (playerId && players[playerId]) {
               const player = players[playerId]
-              const playerData = {
+              entries.push({
                 playerId,
-                name: `${player.first_name} ${player.last_name}`,
+                name: getSleeperPlayerName(player),
                 position: player.position || 'N/A',
                 team: player.team || 'FA',
                 jerseyNumber: player.number?.toString() || '',
                 leagueId: league.sleeper_league_id,
-                leagueName: league.custom_nickname || league.league_name || 'League',
+                leagueName,
                 isOpponent: false
-              }
-
-              // Check if player already exists in lineup
-              const existingPlayerIndex = allLineups.findIndex(p =>
-                p.playerId === playerId && p.isOpponent === false && p.team === playerData.team
-              )
-
-              if (existingPlayerIndex >= 0) {
-                // Add league to existing player
-                allLineups[existingPlayerIndex].leagueIds.push(playerData.leagueId)
-                allLineups[existingPlayerIndex].leagueNames.push(playerData.leagueName)
-              } else {
-                // Add new player
-                allLineups.push({
-                  ...playerData,
-                  leagueIds: [playerData.leagueId],
-                  leagueNames: [playerData.leagueName]
-                })
-              }
+              })
             }
           }
         }
@@ -148,49 +144,61 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
           for (const playerId of actualOpponentStarters) {
             if (playerId && players[playerId]) {
               const player = players[playerId]
-              const playerData = {
+              entries.push({
                 playerId,
-                name: `${player.first_name} ${player.last_name}`,
+                name: getSleeperPlayerName(player),
                 position: player.position || 'N/A',
                 team: player.team || 'FA',
                 jerseyNumber: player.number?.toString() || '',
                 leagueId: league.sleeper_league_id,
-                leagueName: league.custom_nickname || league.league_name || 'League',
+                leagueName,
                 isOpponent: true
-              }
-
-              // Check if player already exists in lineup
-              const existingPlayerIndex = allLineups.findIndex(p =>
-                p.playerId === playerId && p.isOpponent === true && p.team === playerData.team
-              )
-
-              if (existingPlayerIndex >= 0) {
-                // Add league to existing player
-                allLineups[existingPlayerIndex].leagueIds.push(playerData.leagueId)
-                allLineups[existingPlayerIndex].leagueNames.push(playerData.leagueName)
-              } else {
-                // Add new player
-                allLineups.push({
-                  ...playerData,
-                  leagueIds: [playerData.leagueId],
-                  leagueNames: [playerData.leagueName]
-                })
-              }
+              })
             }
           }
         }
+
+        return entries
+      } catch (error: unknown) {
+        if (isAbortError(error)) {
+          throw error
+        }
+
+        console.warn(`Skipping league ${league.sleeper_league_id}:`, error)
+        return null
       }
+    }))
 
-      setPlayerLineups(allLineups)
+    const allLineups: PlayerLineup[] = []
+    const allEntries = leagueResults.flatMap(result => result ?? [])
 
-      // Cache the lineups
-      storage.setPlayerLineups(allLineups)
+    for (const entry of allEntries) {
+      const existingPlayer = allLineups.find(player =>
+        player.playerId === entry.playerId &&
+        player.isOpponent === entry.isOpponent &&
+        player.team === entry.team
+      )
 
-      // Create compact player cache with only needed players
-      const allPlayerIds = Array.from(new Set(allLineups.map(p => p.playerId)))
-      storage.setCompactSleeperPlayers(players, allPlayerIds)
-    } catch (error: any) {
-      setError('Error fetching lineups: ' + error.message)
+      if (existingPlayer) {
+        existingPlayer.leagueIds.push(entry.leagueId)
+        existingPlayer.leagueNames.push(entry.leagueName)
+      } else {
+        allLineups.push({
+          playerId: entry.playerId,
+          name: entry.name,
+          position: entry.position,
+          team: entry.team,
+          jerseyNumber: entry.jerseyNumber,
+          isOpponent: entry.isOpponent,
+          leagueIds: [entry.leagueId],
+          leagueNames: [entry.leagueName]
+        })
+      }
+    }
+
+    return {
+      lineups: allLineups,
+      failureCount: leagueResults.filter(result => result === null).length
     }
   }, [userLeagues])
 
@@ -200,19 +208,25 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
       return
     }
 
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
+    const requestId = ++refreshRequestId.current
+
     setLoading(true)
     setError('')
 
     try {
       // Fetch filtered current week games and players data in parallel
       const [filteredGamesData, playersData] = await Promise.all([
-        fetchFilteredCurrentWeekGames(),
-        fetchSleeperPlayers()
+        fetchFilteredCurrentWeekGames(controller.signal),
+        fetchSleeperPlayers(controller.signal)
       ])
+
+      if (!isMounted.current || requestId !== refreshRequestId.current) return
 
       setGames(filteredGamesData.events)
       setCurrentWeek(filteredGamesData.week.number)
-      setSleeperPlayers(playersData)
 
       // Cache the data
       storage.setGames(filteredGamesData.events)
@@ -220,26 +234,67 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
       // Note: Sleeper players will be cached as compact data in fetchAllLineups
 
       // Fetch lineups for all user leagues
-      await fetchAllLineups(filteredGamesData.week.number, playersData)
+      const { lineups, failureCount } = await fetchAllLineups(filteredGamesData.week.number, playersData, controller.signal)
 
-    } catch (error: any) {
-      setError('Error fetching data: ' + error.message)
+      if (!isMounted.current || requestId !== refreshRequestId.current) return
+
+      setPlayerLineups(lineups)
+      storage.setPlayerLineups(lineups)
+
+      const allPlayerIds = Array.from(new Set(lineups.map(player => player.playerId)))
+      storage.setCompactSleeperPlayers(playersData, allPlayerIds)
+
+      if (failureCount > 0) {
+        setError(`${failureCount} league${failureCount === 1 ? '' : 's'} could not be loaded. Showing the rest.`)
+      }
+
+    } catch (error: unknown) {
+      if (!isAbortError(error) && isMounted.current && requestId === refreshRequestId.current) {
+        setError('Error fetching data: ' + getErrorMessage(error))
+      }
     } finally {
-      setLoading(false)
+      if (isMounted.current && requestId === refreshRequestId.current) {
+        setLoading(false)
+      }
     }
   }, [userLeagues.length, fetchAllLineups])
 
-  // Load cached data and user leagues on mount
+  // Memoized game filtering to avoid recalculation on every render
+  const filteredGames = useMemo(() => {
+    if (games.length === 0) return []
+    if (gameConfig.length === 0) return games
+
+    // Apply configuration
+    const configMap = new Map(gameConfig.map(c => [c.gameId, c]))
+
+    return games
+      .map(game => ({
+        game,
+        config: configMap.get(game.id) || { gameId: game.id, isVisible: true, customOrder: games.indexOf(game) }
+      }))
+      .filter(({ config }) => config.isVisible)
+      .sort((a, b) => a.config.customOrder - b.config.customOrder)
+      .map(({ game }) => game)
+  }, [games, gameConfig])
+
+  // Load user leagues on mount and drop expired local cache entries.
   useEffect(() => {
     fetchUserLeagues()
-    loadCachedData()
-  }, [])
-
-  // Removed redundant useEffect - now handled by memoized filteredGamesMemo
+    storage.clearExpired()
+  }, [fetchUserLeagues])
 
   // Keyboard navigation for game selection only
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const isTyping = target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      )
+
+      if (isTyping || e.altKey || e.ctrlKey || e.metaKey) return
+
       const key = e.key
 
       // Game selection (1-9, A-Z)
@@ -273,65 +328,6 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showLeagueFilter])
-
-  const loadCachedData = () => {
-    // Load cached data
-    const cachedGames = storage.getGames()
-    const cachedPlayers = storage.getSleeperPlayers()
-    const cachedLineups = storage.getPlayerLineups()
-    const cachedWeek = storage.getCurrentWeek()
-    const cachedConfig = storage.getGameConfig()
-    const cachedSelectedGame = storage.getSelectedGame()
-    const cachedHiddenLeagues = storage.getHiddenLeagues()
-
-    if (cachedGames) {
-      setGames(cachedGames)
-    }
-    if (cachedPlayers) {
-      setSleeperPlayers(cachedPlayers)
-    }
-    if (cachedLineups) {
-      setPlayerLineups(cachedLineups)
-    }
-    if (cachedWeek) {
-      setCurrentWeek(cachedWeek)
-    }
-    if (cachedConfig) {
-      setGameConfig(cachedConfig)
-    }
-    if (cachedSelectedGame !== null) {
-      setSelectedGameIndex(cachedSelectedGame)
-    }
-    if (cachedHiddenLeagues) {
-      setHiddenLeagues(new Set(cachedHiddenLeagues))
-    }
-
-    // Clear expired cache
-    storage.clearExpired()
-  }
-
-  // Memoized game filtering to avoid recalculation on every render
-  const filteredGamesMemo = useMemo(() => {
-    if (games.length === 0) return []
-    if (gameConfig.length === 0) return games
-
-    // Apply configuration
-    const configMap = new Map(gameConfig.map(c => [c.gameId, c]))
-
-    return games
-      .map(game => ({
-        game,
-        config: configMap.get(game.id) || { gameId: game.id, isVisible: true, customOrder: games.indexOf(game) }
-      }))
-      .filter(({ config }) => config.isVisible)
-      .sort((a, b) => a.config.customOrder - b.config.customOrder)
-      .map(({ game }) => game)
-  }, [games, gameConfig])
-
-  // Update filteredGames state when memoized value changes
-  useEffect(() => {
-    setFilteredGames(filteredGamesMemo)
-  }, [filteredGamesMemo])
 
   const handleGameConfigSave = useCallback((newConfig: GameConfig[]) => {
     setGameConfig(newConfig)
@@ -381,79 +377,6 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
       return newSet
     })
   }, [])
-
-  const fetchAllLeaguesMatchups = useCallback(async (week: number) => {
-    if (userLeagues.length === 0) return
-
-    setAllLeaguesLoading(true)
-    const allLeaguesMatchups = []
-
-    try {
-      for (const league of userLeagues) {
-        const leagueId = league.sleeper_league_id
-        const sleeperUserId = league.sleeper_user_id
-
-        if (!sleeperUserId) continue
-
-        // Fetch league data
-        const [rosters, users, matchups] = await Promise.all([
-          fetchSleeperLeagueRosters(leagueId),
-          fetchSleeperLeagueUsers(leagueId),
-          fetchSleeperMatchups(leagueId, week)
-        ])
-
-        // Find user's roster
-        const userRoster = findUserRoster(rosters, sleeperUserId)
-        if (!userRoster) continue
-
-        // Find user's matchup
-        const userMatchup = matchups.find(m => m.roster_id === userRoster.roster_id)
-        if (!userMatchup) continue
-
-        // Find opponent's matchup and roster
-        const opponentMatchup = matchups.find(m =>
-          m.matchup_id === userMatchup.matchup_id && m.roster_id !== userRoster.roster_id
-        )
-        const opponentRoster = opponentMatchup ? rosters.find(r => r.roster_id === opponentMatchup.roster_id) : null
-
-        // Find user names
-        const userOwner = users.find(u => u.user_id === userRoster.owner_id)?.display_name || 'You'
-        const opponentOwner = opponentRoster ?
-          users.find(u => u.user_id === opponentRoster.owner_id)?.display_name || 'Opponent' : 'Bye Week'
-
-        // Calculate projected points (simple estimation based on current scoring rate)
-        const userProjectedPoints = userMatchup.points || 0
-        const opponentProjectedPoints = opponentMatchup?.points || 0
-
-        allLeaguesMatchups.push({
-          leagueId: league.sleeper_league_id,
-          leagueName: league.custom_nickname || league.league_name || 'League',
-          userRoster: {
-            rosterId: userRoster.roster_id,
-            points: userMatchup.points || 0,
-            projectedPoints: userProjectedPoints,
-            owner: userOwner
-          },
-          opponentRoster: {
-            rosterId: opponentRoster?.roster_id || 0,
-            points: opponentMatchup?.points || 0,
-            projectedPoints: opponentProjectedPoints,
-            owner: opponentOwner
-          },
-          matchupId: userMatchup.matchup_id
-        })
-      }
-
-      setAllLeaguesData(allLeaguesMatchups)
-      // Cache the data
-      storage.set('redzone_all_leagues_matchups', allLeaguesMatchups)
-
-    } catch (error: any) {
-      setError('Error fetching all leagues data: ' + error.message)
-    } finally {
-      setAllLeaguesLoading(false)
-    }
-  }, [userLeagues])
 
   // Memoized function to get players for a specific game - optimized for performance
   const getPlayersForGame = useMemo(() => {
@@ -522,9 +445,14 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
 
   // Memoized selected game and players calculation to avoid unnecessary recalculations
   // IMPORTANT: Must be before any conditional returns to maintain hook order
+  const activeSelectedGameIndex = useMemo(() =>
+    selectedGameIndex !== null && selectedGameIndex < filteredGames.length ? selectedGameIndex : null,
+    [selectedGameIndex, filteredGames.length]
+  )
+
   const selectedGame = useMemo(() =>
-    selectedGameIndex !== null ? filteredGames[selectedGameIndex] : null,
-    [selectedGameIndex, filteredGames]
+    activeSelectedGameIndex !== null ? filteredGames[activeSelectedGameIndex] : null,
+    [activeSelectedGameIndex, filteredGames]
   )
 
   const selectedGamePlayers = useMemo(() =>
@@ -535,32 +463,35 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
   // Early return for empty state - after all hooks are called
   if (filteredGames.length === 0 && !loading) {
     return (
-      <div className="min-h-screen bg-slate-900 text-white">
-        <div className="bg-slate-800 border-b border-slate-700 p-6">
-          <div className="container mx-auto">
-            <div className="flex justify-between items-center">
-              <button
-                onClick={onBackToDashboard}
-                className="btn btn-secondary"
-              >
-                ← Back to Dashboard
-              </button>
-              <h1 className="text-3xl font-bold">RedZone View</h1>
-              <button
-                onClick={refreshData}
-                disabled={loading}
-                className="btn btn-primary"
-              >
-                {loading ? 'Loading...' : 'Refresh Data'}
-              </button>
-            </div>
+      <div className="space-y-4 text-white">
+        <section className="flex flex-col gap-4 rounded-lg border border-slate-700 bg-slate-800 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-blue-300">RedZone</p>
+            <h1 className="text-2xl font-bold text-white md:text-3xl">Games</h1>
           </div>
-        </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={onBackToDashboard}
+              className="btn btn-secondary"
+            >
+              Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={refreshData}
+              disabled={loading}
+              className="btn btn-primary"
+            >
+              {loading ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
+        </section>
 
         <div className="container mx-auto px-6 py-20">
           <div className="text-center max-w-lg mx-auto">
             <h2 className="text-2xl font-semibold text-white mb-6">Ready to Track Your Players</h2>
-            <p className="text-slate-400 text-lg mb-8">Click "Refresh Data" to load current week games and your active lineups</p>
+            <p className="text-slate-400 text-lg mb-8">Click Refresh Data to load current week games and your active lineups</p>
             <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-6">
               <p className="text-sm text-slate-500">Make sure you have leagues configured in your dashboard first</p>
             </div>
@@ -568,9 +499,9 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
         </div>
 
         {error && (
-          <div className="fixed bottom-6 left-6 right-6 max-w-lg mx-auto bg-red-900/90 backdrop-blur-sm border border-red-700 text-red-100 p-4 rounded-lg shadow-lg">
+          <div className="fixed bottom-6 left-6 right-6 max-w-lg mx-auto bg-red-900/90 backdrop-blur-sm border border-red-700 text-red-100 p-4 rounded-lg shadow-lg" role="alert" aria-live="assertive">
             <div className="flex items-start gap-3">
-              <div className="text-red-400 flex-shrink-0 mt-0.5">⚠</div>
+              <div className="text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true">!</div>
               <div>{error}</div>
             </div>
           </div>
@@ -580,49 +511,53 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
+    <div className="space-y-4 text-white">
       {/* Header with Controls */}
-      <div className="bg-slate-800 border-b border-slate-700 p-4">
-        <div className="container mx-auto">
-          <div className="flex justify-between items-center mb-4">
+      <div className="rounded-lg border border-slate-700 bg-slate-800 p-4">
+        <div>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <button
+              type="button"
               onClick={onBackToDashboard}
               className="btn btn-secondary"
             >
-              ← Back to Dashboard
+              Dashboard
             </button>
-            <div className="text-center">
-              <h1 className="text-3xl font-bold">Week {currentWeek} Games</h1>
-              <p className="text-sm text-slate-400 mt-1">
-                Hotkeys: 1-9/A-Z = Select games
-              </p>
+            <div className="lg:text-center">
+              <p className="text-sm font-semibold uppercase tracking-wide text-blue-300">Week {currentWeek}</p>
+              <h1 className="text-2xl font-bold text-white md:text-3xl">RedZone Games</h1>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row">
               <button
+                type="button"
                 onClick={refreshData}
                 disabled={loading}
                 className="btn btn-primary"
               >
-                {loading ? 'Loading...' : 'Refresh Data'}
+                {loading ? 'Loading...' : 'Refresh'}
               </button>
               <div className="relative">
                 <button
+                  type="button"
                   onClick={() => setShowLeagueFilter(!showLeagueFilter)}
+                  aria-expanded={showLeagueFilter}
+                  aria-controls="league-filter-menu"
                   className="btn btn-secondary"
                 >
                   Filter Leagues
                 </button>
                 {showLeagueFilter && (
-                  <div className="absolute right-0 top-full mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 min-w-[200px]">
+                  <div id="league-filter-menu" className="absolute right-0 top-full mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 min-w-[240px]">
                     <div className="p-3 border-b border-slate-700">
                       <h3 className="font-semibold text-white text-sm">League Visibility</h3>
-                      <p className="text-xs text-slate-400 mt-1">Hide leagues to focus on active matchups</p>
                     </div>
                     <div className="max-h-60 overflow-y-auto">
                       {uniqueLeagues.map(league => (
                         <button
                           key={league.id}
+                          type="button"
                           onClick={() => toggleLeagueVisibility(league.id)}
+                          aria-pressed={!hiddenLeagues.has(league.id)}
                           className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors flex items-center justify-between group"
                         >
                           <span className="text-sm text-white truncate">{league.name}</span>
@@ -649,6 +584,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                 )}
               </div>
               <button
+                type="button"
                 onClick={() => setShowGameConfig(true)}
                 className="btn btn-secondary"
               >
@@ -662,12 +598,15 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
             {filteredGames.map((game, index) => {
               const homeTeam = game.competitions[0]?.competitors.find(c => c.homeAway === 'home')
               const awayTeam = game.competitions[0]?.competitors.find(c => c.homeAway === 'away')
-              const isSelected = selectedGameIndex === index
+              const isSelected = activeSelectedGameIndex === index
               
               return (
                 <button
                   key={game.id}
-                  onClick={() => setSelectedGameIndex(index)}
+                  type="button"
+                  onClick={() => handleGameClick(index)}
+                  aria-pressed={isSelected}
+                  aria-label={`Select ${awayTeam?.team.abbreviation || 'away team'} at ${homeTeam?.team.abbreviation || 'home team'}`}
                   className={`px-1 py-3 rounded-lg text-sm font-medium transition-all border min-w-[110px] ${
                     isSelected 
                       ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-500/25' 
@@ -703,7 +642,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
           <div>
             {/* Game Header */}
             <div className="text-center mb-6">
-              <div className="flex items-center justify-between mb-3 max-w-4xl mx-auto">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-3 max-w-4xl mx-auto">
                 {(() => {
                   const awayTeamData = selectedGame.competitions[0]?.competitors.find(c => c.homeAway === 'away')
                   const homeTeamData = selectedGame.competitions[0]?.competitors.find(c => c.homeAway === 'home')
@@ -713,16 +652,16 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                   const weather = selectedGame.weather
                   return (
                     <>
-                      <div className="flex items-start gap-3 flex-1 justify-end">
+                      <div className="flex items-start gap-3 flex-1 justify-center md:justify-end">
                         {awayTeamData?.team?.logo && (
                           <img src={awayTeamData.team.logo} alt={awayTeamData.team.displayName} className="w-10 h-10" style={{marginTop: '-5px'}} />
                         )}
-                        <div className="text-right">
-                          <h2 className="text-2xl font-bold text-white">{awayTeamData?.team.displayName}</h2>
+                        <div className="text-center md:text-right">
+                          <h2 className="text-xl font-bold text-white md:text-2xl">{awayTeamData?.team.displayName}</h2>
                           {awayRecord && <div className="text-xs text-slate-400">({awayRecord})</div>}
                         </div>
                       </div>
-                      <div className="flex flex-col items-center px-6 min-w-[160px]">
+                      <div className="flex flex-col items-center px-2 md:min-w-[160px] md:px-6">
                         <div className="text-xs text-slate-400 text-center space-y-0.5">
                           <div>{new Date(selectedGame.date).toLocaleTimeString()}</div>
                           {venue && <div className="truncate max-w-[140px]" title={venue}>{venue}</div>}
@@ -742,9 +681,9 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                           )}
                         </div>
                       </div>
-                      <div className="flex items-start gap-3 flex-1">
-                        <div className="text-left">
-                          <h2 className="text-2xl font-bold text-white">{homeTeamData?.team.displayName}</h2>
+                      <div className="flex items-start gap-3 flex-1 justify-center md:justify-start">
+                        <div className="text-center md:text-left">
+                          <h2 className="text-xl font-bold text-white md:text-2xl">{homeTeamData?.team.displayName}</h2>
                           {homeRecord && <div className="text-xs text-slate-400">({homeRecord})</div>}
                         </div>
                         {homeTeamData?.team?.logo && (
@@ -947,25 +886,26 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
         )}
       </div>
 
-      {(error || message) && (
+      {error && (
         <div className={`fixed bottom-6 left-6 right-6 max-w-lg mx-auto backdrop-blur-sm p-4 rounded-lg shadow-lg ${
           error 
             ? 'bg-red-900/90 border border-red-700 text-red-100' 
             : 'bg-green-900/90 border border-green-700 text-green-100'
-        }`}>
+        }`} role="alert" aria-live="assertive">
           <div className="flex items-start gap-3">
-            <div className={`flex-shrink-0 mt-0.5 ${error ? 'text-red-400' : 'text-green-400'}`}>
-              {error ? '⚠' : '✓'}
+            <div className={`flex-shrink-0 mt-0.5 ${error ? 'text-red-400' : 'text-green-400'}`} aria-hidden="true">
+              {error ? '!' : 'OK'}
             </div>
-            <div>{error || message}</div>
+            <div>{error}</div>
             <button
+              type="button"
               onClick={() => {
                 setError('')
-                setMessage('')
               }}
+              aria-label="Close error message"
               className="ml-auto text-xs opacity-75 hover:opacity-100"
             >
-              ✕
+              Close
             </button>
           </div>
         </div>

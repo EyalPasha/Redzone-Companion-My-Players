@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import {
-  fetchSleeperNFLState,
   fetchSleeperLeagueRosters,
   fetchSleeperLeagueUsers,
   fetchSleeperMatchups,
@@ -13,11 +12,21 @@ import {
   findOpponentRoster,
   getEffectiveCurrentWeek
 } from '@/lib/api'
-import { UserLeague, SleeperRoster, SleeperUser, SleeperMatchup } from '@/types'
+import { getErrorMessage, isAbortError } from '@/lib/errors'
+import { getSleeperPlayerName } from '@/lib/players'
+import { UserLeague, SleeperPlayers } from '@/types'
 
 interface AllLeaguesViewProps {
   user: User
   onBackToDashboard: () => void
+}
+
+interface StarterPlayer {
+  playerId: string
+  name: string
+  position: string
+  team: string
+  jerseyNumber: string
 }
 
 interface LeagueLineup {
@@ -26,24 +35,12 @@ interface LeagueLineup {
   userRoster: {
     rosterId: number
     owner: string
-    starters: Array<{
-      playerId: string
-      name: string
-      position: string
-      team: string
-      jerseyNumber: string
-    }>
+    starters: StarterPlayer[]
   }
   opponentRoster: {
     rosterId: number
     owner: string
-    starters: Array<{
-      playerId: string
-      name: string
-      position: string
-      team: string
-      jerseyNumber: string
-    }>
+    starters: StarterPlayer[]
   } | null
   matchupId: number | null
 }
@@ -54,9 +51,23 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [currentWeek, setCurrentWeek] = useState(1)
-  const [sleeperPlayers, setSleeperPlayers] = useState<Record<string, any>>({})
+  const fetchLeaguesRequestId = useRef(0)
+  const refreshRequestId = useRef(0)
+  const refreshController = useRef<AbortController | null>(null)
+  const isMounted = useRef(true)
 
-  const fetchUserLeagues = async () => {
+  useEffect(() => {
+    return () => {
+      isMounted.current = false
+      fetchLeaguesRequestId.current += 1
+      refreshRequestId.current += 1
+      refreshController.current?.abort()
+    }
+  }, [])
+
+  const fetchUserLeagues = useCallback(async () => {
+    const requestId = ++fetchLeaguesRequestId.current
+
     try {
       const { data, error } = await supabase
         .from('user_leagues')
@@ -64,38 +75,44 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
         .eq('user_id', user.id)
 
       if (error) throw error
+      if (!isMounted.current || requestId !== fetchLeaguesRequestId.current) return
+
       setUserLeagues(data || [])
-    } catch (error: any) {
-      setError('Error fetching leagues: ' + error.message)
+    } catch (error: unknown) {
+      if (!isMounted.current || requestId !== fetchLeaguesRequestId.current) return
+
+      setError('Error fetching leagues: ' + getErrorMessage(error))
     }
-  }
+  }, [user.id])
 
-  const fetchAllLeagueLineups = useCallback(async (week: number, players: Record<string, any>) => {
-    const allLineups: LeagueLineup[] = []
-
-    try {
-      for (const league of userLeagues) {
+  const fetchAllLeagueLineups = useCallback(async (
+    week: number,
+    players: SleeperPlayers,
+    signal?: AbortSignal
+  ): Promise<{ lineups: LeagueLineup[], failureCount: number }> => {
+    const results = await Promise.all(userLeagues.map(async (league) => {
+      try {
         const leagueId = league.sleeper_league_id
         const leagueName = league.custom_nickname || league.league_name || 'League'
 
         // Fetch league data in parallel
         const [rosters, users, matchups] = await Promise.all([
-          fetchSleeperLeagueRosters(leagueId),
-          fetchSleeperLeagueUsers(leagueId),
-          fetchSleeperMatchups(leagueId, week)
+          fetchSleeperLeagueRosters(leagueId, signal),
+          fetchSleeperLeagueUsers(leagueId, signal),
+          fetchSleeperMatchups(leagueId, week, signal)
         ])
 
         // Find user's roster using stored Sleeper user ID
         const sleeperUserId = league.sleeper_user_id
         if (!sleeperUserId) {
           console.warn(`No Sleeper user ID stored for league ${leagueId}`)
-          continue
+          return null
         }
 
         const userRoster = findUserRoster(rosters, sleeperUserId)
         if (!userRoster) {
           console.warn(`User roster not found in league ${leagueId}`)
-          continue
+          return null
         }
 
         // Find user's matchup
@@ -119,56 +136,63 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
         const actualOpponentStarters = opponentMatchup?.starters || opponentRoster?.starters
 
         // Process user starters
-        const userStartersData = actualUserStarters?.map(playerId => {
+        const userStartersData = actualUserStarters?.map((playerId): StarterPlayer | null => {
           if (playerId && players[playerId]) {
             const player = players[playerId]
             return {
               playerId,
-              name: `${player.first_name} ${player.last_name}`,
+              name: getSleeperPlayerName(player),
               position: player.position || 'N/A',
               team: player.team || 'FA',
               jerseyNumber: player.number?.toString() || ''
             }
           }
           return null
-        }).filter(Boolean) || []
+        }).filter((player): player is StarterPlayer => Boolean(player)) || []
 
         // Process opponent starters
-        const opponentStartersData = actualOpponentStarters?.map(playerId => {
+        const opponentStartersData = actualOpponentStarters?.map((playerId): StarterPlayer | null => {
           if (playerId && players[playerId]) {
             const player = players[playerId]
             return {
               playerId,
-              name: `${player.first_name} ${player.last_name}`,
+              name: getSleeperPlayerName(player),
               position: player.position || 'N/A',
               team: player.team || 'FA',
               jerseyNumber: player.number?.toString() || ''
             }
           }
           return null
-        }).filter(Boolean) || []
+        }).filter((player): player is StarterPlayer => Boolean(player)) || []
 
-        allLineups.push({
+        return {
           leagueId: league.sleeper_league_id,
           leagueName,
           userRoster: {
             rosterId: userRoster.roster_id,
             owner: userOwner,
-            starters: userStartersData as any
+            starters: userStartersData
           },
           opponentRoster: opponentRoster ? {
             rosterId: opponentRoster.roster_id,
             owner: opponentOwner || 'Opponent',
-            starters: opponentStartersData as any
+            starters: opponentStartersData
           } : null,
           matchupId: userMatchup?.matchup_id || null
-        })
+        } satisfies LeagueLineup
+      } catch (error: unknown) {
+        if (isAbortError(error)) {
+          throw error
+        }
+
+        console.warn(`Skipping league ${league.sleeper_league_id}:`, error)
+        return null
       }
+    }))
 
-      setLeagueLineups(allLineups)
-
-    } catch (error: any) {
-      setError('Error fetching league lineups: ' + error.message)
+    return {
+      lineups: results.filter((lineup): lineup is LeagueLineup => Boolean(lineup)),
+      failureCount: results.filter(result => result === null).length
     }
   }, [userLeagues])
 
@@ -178,33 +202,51 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
       return
     }
 
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
+    const requestId = ++refreshRequestId.current
+
     setLoading(true)
     setError('')
 
     try {
       // Get current week and players data
       const [week, playersData] = await Promise.all([
-        getEffectiveCurrentWeek(),
-        fetchSleeperPlayers()
+        getEffectiveCurrentWeek(controller.signal),
+        fetchSleeperPlayers(controller.signal)
       ])
 
+      if (!isMounted.current || requestId !== refreshRequestId.current) return
+
       setCurrentWeek(week)
-      setSleeperPlayers(playersData)
 
       // Fetch lineups for all leagues
-      await fetchAllLeagueLineups(week, playersData)
+      const { lineups, failureCount } = await fetchAllLeagueLineups(week, playersData, controller.signal)
 
-    } catch (error: any) {
-      setError('Error fetching data: ' + error.message)
+      if (!isMounted.current || requestId !== refreshRequestId.current) return
+
+      setLeagueLineups(lineups)
+
+      if (failureCount > 0) {
+        setError(`${failureCount} league${failureCount === 1 ? '' : 's'} could not be loaded. Showing the rest.`)
+      }
+
+    } catch (error: unknown) {
+      if (!isAbortError(error) && isMounted.current && requestId === refreshRequestId.current) {
+        setError('Error fetching data: ' + getErrorMessage(error))
+      }
     } finally {
-      setLoading(false)
+      if (isMounted.current && requestId === refreshRequestId.current) {
+        setLoading(false)
+      }
     }
   }, [userLeagues.length, fetchAllLeagueLineups])
 
   // Load user leagues on mount
   useEffect(() => {
     fetchUserLeagues()
-  }, [])
+  }, [fetchUserLeagues])
 
   // Auto-refresh when leagues are loaded
   useEffect(() => {
@@ -214,36 +256,35 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
   }, [userLeagues.length, refreshData])
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
-      {/* Header */}
-      <div className="bg-slate-800 border-b border-slate-700 p-4">
-        <div className="container mx-auto">
-          <div className="flex justify-between items-center">
-            <button
-              onClick={onBackToDashboard}
-              className="btn btn-secondary"
-            >
-              ← Back to Dashboard
-            </button>
-            <div className="text-center">
-              <h1 className="text-3xl font-bold">All League Lineups</h1>
-              <p className="text-sm text-slate-400 mt-1">Week {currentWeek}</p>
-            </div>
-            <button
-              onClick={refreshData}
-              disabled={loading}
-              className="btn btn-primary"
-            >
-              {loading ? 'Loading...' : 'Refresh Data'}
-            </button>
-          </div>
+    <div className="space-y-4 text-white">
+      <section className="flex flex-col gap-4 rounded-lg border border-slate-700 bg-slate-800 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-blue-300">Week {currentWeek}</p>
+          <h1 className="text-2xl font-bold text-white md:text-3xl">All League Lineups</h1>
         </div>
-      </div>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={onBackToDashboard}
+            className="btn btn-secondary"
+          >
+            Dashboard
+          </button>
+          <button
+            type="button"
+            onClick={refreshData}
+            disabled={loading}
+            className="btn btn-primary"
+          >
+            {loading ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
+      </section>
 
       {/* Content */}
-      <div className="container mx-auto p-4">
+      <div>
         {loading ? (
-          <div className="text-center py-20">
+          <div className="text-center py-20" role="status" aria-live="polite">
             <div className="text-2xl font-semibold text-slate-300 mb-4">Loading lineups...</div>
             <div className="text-slate-400">Fetching data from all your leagues</div>
           </div>
@@ -252,6 +293,7 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
             <div className="text-2xl font-semibold text-slate-300 mb-4">No lineups found</div>
             <div className="text-slate-400 mb-6">Make sure you have leagues configured and try refreshing</div>
             <button
+              type="button"
               onClick={refreshData}
               className="btn btn-primary"
             >
@@ -362,15 +404,17 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
 
       {/* Error Toast */}
       {error && (
-        <div className="fixed bottom-6 left-6 right-6 max-w-lg mx-auto bg-red-900/90 backdrop-blur-sm border border-red-700 text-red-100 p-4 rounded-lg shadow-lg">
+        <div className="fixed bottom-6 left-6 right-6 max-w-lg mx-auto bg-red-900/90 backdrop-blur-sm border border-red-700 text-red-100 p-4 rounded-lg shadow-lg" role="alert" aria-live="assertive">
           <div className="flex items-start gap-3">
-            <div className="text-red-400 flex-shrink-0 mt-0.5">⚠</div>
+            <div className="text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true">!</div>
             <div>{error}</div>
             <button
+              type="button"
               onClick={() => setError('')}
+              aria-label="Close error message"
               className="ml-auto text-xs opacity-75 hover:opacity-100"
             >
-              ✕
+              Close
             </button>
           </div>
         </div>

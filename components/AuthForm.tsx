@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { getErrorMessage } from '@/lib/errors'
 
 export default function AuthForm() {
   const [email, setEmail] = useState('')
@@ -31,8 +32,8 @@ export default function AuthForm() {
         if (error) throw error
         setMessage('Check your email for the confirmation link!')
       }
-    } catch (error: any) {
-      setMessage(error.message)
+    } catch (error: unknown) {
+      setMessage(getErrorMessage(error))
     } finally {
       setLoading(false)
     }
@@ -100,7 +101,10 @@ export default function AuthForm() {
           message.includes('successfully') || message.includes('email') 
             ? 'bg-emerald-900/50 text-emerald-300 border-emerald-700' 
             : 'bg-red-900/50 text-red-300 border-red-700'
-        }`}>
+        }`}
+          role={message.includes('successfully') || message.includes('email') ? 'status' : 'alert'}
+          aria-live={message.includes('successfully') || message.includes('email') ? 'polite' : 'assertive'}
+        >
           {message}
         </div>
       )}
