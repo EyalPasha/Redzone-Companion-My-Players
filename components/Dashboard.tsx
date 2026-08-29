@@ -32,6 +32,7 @@ export default function Dashboard({ user, onStartRedZoneSession, onViewAllLeague
   const isMounted = useRef(true)
 
   useEffect(() => {
+    isMounted.current = true
     return () => {
       isMounted.current = false
       fetchLeaguesRequestId.current += 1
@@ -365,15 +366,25 @@ export default function Dashboard({ user, onStartRedZoneSession, onViewAllLeague
 
         {/* Messages */}
         {message && (
-          <div className={`mt-8 p-4 rounded-lg border ${
-            message.includes('successfully') 
-              ? 'bg-emerald-900/50 text-emerald-300 border-emerald-700' 
-              : 'bg-red-900/50 text-red-300 border-red-700'
+          <div className={`fixed bottom-6 left-6 right-6 z-60 max-w-lg mx-auto p-4 rounded-lg border shadow-lg backdrop-blur-sm ${
+            message.includes('successfully')
+              ? 'bg-emerald-900/90 text-emerald-300 border-emerald-700'
+              : 'bg-red-900/90 text-red-300 border-red-700'
           }`}
             role={message.includes('successfully') ? 'status' : 'alert'}
             aria-live={message.includes('successfully') ? 'polite' : 'assertive'}
           >
-            {message}
+            <div className="flex items-start gap-3">
+              <div>{message}</div>
+              <button
+                type="button"
+                onClick={() => setMessage('')}
+                aria-label="Close message"
+                className="ml-auto shrink-0 rounded px-3 py-2 text-xs opacity-75 hover:opacity-100"
+              >
+                Close
+              </button>
+            </div>
           </div>
         )}
 

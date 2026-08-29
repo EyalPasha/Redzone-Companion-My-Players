@@ -57,6 +57,7 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
   const isMounted = useRef(true)
 
   useEffect(() => {
+    isMounted.current = true
     return () => {
       isMounted.current = false
       fetchLeaguesRequestId.current += 1

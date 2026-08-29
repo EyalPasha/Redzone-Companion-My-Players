@@ -40,6 +40,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
   const isMounted = useRef(true)
   
   useEffect(() => {
+    isMounted.current = true
     return () => {
       isMounted.current = false
       fetchLeaguesRequestId.current += 1
