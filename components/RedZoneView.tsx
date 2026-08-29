@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import {
@@ -29,11 +30,11 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
   const [playerLineups, setPlayerLineups] = useState<PlayerLineup[]>(() => storage.getPlayerLineups() ?? [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [currentWeek, setCurrentWeek] = useState(() => storage.getCurrentWeek() ?? 1)
   const [gameConfig, setGameConfig] = useState<GameConfig[]>(() => storage.getGameConfig())
   const [showGameConfig, setShowGameConfig] = useState(false)
   const [hiddenLeagues, setHiddenLeagues] = useState<Set<string>>(() => new Set(storage.getHiddenLeagues()))
-  const [showLeagueFilter, setShowLeagueFilter] = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
+  const [headerActionsTarget, setHeaderActionsTarget] = useState<HTMLElement | null>(null)
   const fetchLeaguesRequestId = useRef(0)
   const refreshRequestId = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
@@ -227,7 +228,6 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
       if (!isMounted.current || requestId !== refreshRequestId.current) return
 
       setGames(filteredGamesData.events)
-      setCurrentWeek(filteredGamesData.week.number)
 
       // Cache the data
       storage.setGames(filteredGamesData.events)
@@ -323,14 +323,19 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
   // Close league filter dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (showLeagueFilter && !(e.target as Element)?.closest('.relative')) {
-        setShowLeagueFilter(false)
+      if (showMenu && !(e.target as Element)?.closest('.relative')) {
+        setShowMenu(false)
       }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showLeagueFilter])
+  }, [showMenu])
+
+  // Render the options menu into the app header instead of this view's own card
+  useEffect(() => {
+    setHeaderActionsTarget(document.getElementById('view-header-actions'))
+  }, [])
 
   const handleGameConfigSave = useCallback((newConfig: GameConfig[]) => {
     setGameConfig(newConfig)
@@ -519,90 +524,90 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
   }
 
   return (
+    <>
+      {headerActionsTarget && createPortal(
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowMenu(!showMenu)}
+            aria-expanded={showMenu}
+            aria-controls="redzone-options-menu"
+            aria-label="Filters and options"
+            title="Filters and options"
+            className="btn btn-secondary shrink-0 px-4 py-3"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+              <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+            </svg>
+          </button>
+          {showMenu && (
+            <div id="redzone-options-menu" className="absolute right-0 top-full mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 min-w-60">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMenu(false)
+                  refreshData()
+                }}
+                disabled={loading}
+                className="w-full text-left px-3 py-3 hover:bg-slate-700 transition-colors text-sm font-semibold text-white border-b border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowGameConfig(true)
+                  setShowMenu(false)
+                }}
+                className="w-full text-left px-3 py-3 hover:bg-slate-700 transition-colors text-sm font-semibold text-white border-b border-slate-700"
+              >
+                Configure Games
+              </button>
+              <div className="p-3 border-b border-slate-700">
+                <h3 className="font-semibold text-white text-sm">League Visibility</h3>
+              </div>
+              <div className="max-h-60 overflow-y-auto">
+                {uniqueLeagues.map(league => (
+                  <button
+                    key={league.id}
+                    type="button"
+                    onClick={() => toggleLeagueVisibility(league.id)}
+                    aria-pressed={!hiddenLeagues.has(league.id)}
+                    className="w-full text-left px-3 py-3 hover:bg-slate-700 transition-colors flex items-center justify-between group"
+                  >
+                    <span className="text-sm text-white truncate">{league.name}</span>
+                    <div className={`w-4 h-4 rounded border ${
+                      hiddenLeagues.has(league.id)
+                        ? 'bg-slate-600 border-slate-500'
+                        : 'bg-blue-500 border-blue-400'
+                    } flex items-center justify-center`}>
+                      {!hiddenLeagues.has(league.id) && (
+                        <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                    </div>
+                  </button>
+                ))}
+                {uniqueLeagues.length === 0 && (
+                  <div className="px-3 py-4 text-center text-slate-400 text-sm">
+                    No leagues found
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>,
+        headerActionsTarget
+      )}
+
     <div className="space-y-4 text-white">
       {/* Header with Controls */}
       <div className="rounded-lg border border-slate-700 bg-slate-800 p-4">
         <div>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <button
-              type="button"
-              onClick={onBackToDashboard}
-              className="btn btn-secondary"
-            >
-              Dashboard
-            </button>
-            <div className="lg:text-center">
-              <p className="text-sm font-semibold uppercase tracking-wide text-blue-300">Week {currentWeek}</p>
-              <h1 className="text-2xl font-bold text-white md:text-3xl">RedZone Games</h1>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={refreshData}
-                disabled={loading}
-                className="btn btn-primary"
-              >
-                {loading ? 'Loading...' : 'Refresh'}
-              </button>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setShowLeagueFilter(!showLeagueFilter)}
-                  aria-expanded={showLeagueFilter}
-                  aria-controls="league-filter-menu"
-                  className="btn btn-secondary"
-                >
-                  Filter Leagues
-                </button>
-                {showLeagueFilter && (
-                  <div id="league-filter-menu" className="absolute right-0 top-full mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 min-w-[240px]">
-                    <div className="p-3 border-b border-slate-700">
-                      <h3 className="font-semibold text-white text-sm">League Visibility</h3>
-                    </div>
-                    <div className="max-h-60 overflow-y-auto">
-                      {uniqueLeagues.map(league => (
-                        <button
-                          key={league.id}
-                          type="button"
-                          onClick={() => toggleLeagueVisibility(league.id)}
-                          aria-pressed={!hiddenLeagues.has(league.id)}
-                          className="w-full text-left px-3 py-3 hover:bg-slate-700 transition-colors flex items-center justify-between group"
-                        >
-                          <span className="text-sm text-white truncate">{league.name}</span>
-                          <div className={`w-4 h-4 rounded border ${
-                            hiddenLeagues.has(league.id)
-                              ? 'bg-slate-600 border-slate-500'
-                              : 'bg-blue-500 border-blue-400'
-                          } flex items-center justify-center`}>
-                            {!hiddenLeagues.has(league.id) && (
-                              <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                              </svg>
-                            )}
-                          </div>
-                        </button>
-                      ))}
-                      {uniqueLeagues.length === 0 && (
-                        <div className="px-3 py-4 text-center text-slate-400 text-sm">
-                          No leagues found
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowGameConfig(true)}
-                className="btn btn-secondary"
-              >
-                Configure Games
-              </button>
-            </div>
-          </div>
 
           {/* Games Header */}
-          <div className="flex flex-wrap gap-2 justify-center max-w-6xl mx-auto px-2">
+          <div className="flex flex-wrap gap-1 px-2">
             {filteredGames.map((game, index) => {
               const homeTeam = game.competitions[0]?.competitors.find(c => c.homeAway === 'home')
               const awayTeam = game.competitions[0]?.competitors.find(c => c.homeAway === 'away')
@@ -615,25 +620,25 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                   onClick={() => handleGameClick(game.id)}
                   aria-pressed={isSelected}
                   aria-label={`Select ${awayTeam?.team.abbreviation || 'away team'} at ${homeTeam?.team.abbreviation || 'home team'}`}
-                  className={`px-1 py-3 rounded-lg text-sm font-medium transition-all border min-w-[110px] ${
-                    isSelected 
-                      ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-500/25' 
-                      : 'bg-slate-700 hover:bg-slate-600 text-slate-300 border-slate-600'
+                  className={`flex-1 px-0.5 py-3 rounded-lg text-sm font-medium transition-all border ${
+                    isSelected
+                      ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-500/25'
+                      : 'bg-slate-700 hover:bg-slate-600 text-slate-100 border-slate-600'
                   }`}
                 >
-                  <div className="text-xs font-bold text-center mb-1 opacity-75">{getKeyboardLabel(index)}</div>
-                  <div className="flex items-center justify-center gap-1.5 text-xs">
-                    <div className="flex items-center gap-1">
+                  <div className="text-xl font-extrabold text-center leading-none mb-1">{getKeyboardLabel(index)}</div>
+                  <div className="flex items-center justify-center gap-1 text-xs tracking-wide">
+                    <div className="flex items-center gap-0.5">
                       {awayTeam?.team?.logo && (
-                        <img src={awayTeam.team.logo} alt={awayTeam.team.abbreviation} className="w-4 h-4" />
+                        <img src={awayTeam.team.logo} alt={awayTeam.team.abbreviation} className="w-3 h-3" />
                       )}
-                      <span className="font-medium">{awayTeam?.team.abbreviation}</span>
+                      <span className="font-extrabold">{awayTeam?.team.abbreviation}</span>
                     </div>
                     <span className="opacity-75 font-medium text-xs">@</span>
-                    <div className="flex items-center gap-1">
-                      <span className="font-medium">{homeTeam?.team.abbreviation}</span>
+                    <div className="flex items-center gap-0.5">
+                      <span className="font-extrabold">{homeTeam?.team.abbreviation}</span>
                       {homeTeam?.team?.logo && (
-                        <img src={homeTeam.team.logo} alt={homeTeam.team.abbreviation} className="w-4 h-4" />
+                        <img src={homeTeam.team.logo} alt={homeTeam.team.abbreviation} className="w-3 h-3" />
                       )}
                     </div>
                   </div>
@@ -660,40 +665,45 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                   const weather = selectedGame.weather
                   return (
                     <>
-                      <div className="flex items-start gap-3 flex-1 justify-center md:justify-end">
+                      <div className="flex items-center gap-3 flex-1 justify-center md:justify-end">
                         {awayTeamData?.team?.logo && (
                           <img src={awayTeamData.team.logo} alt={awayTeamData.team.displayName} className="w-10 h-10" style={{marginTop: '-5px'}} />
                         )}
-                        <div className="text-center md:text-right">
-                          <h2 className="text-xl font-bold text-white md:text-2xl">{awayTeamData?.team.displayName}</h2>
-                          {awayRecord && <div className="text-xs text-slate-400">({awayRecord})</div>}
-                        </div>
+                        <h2 className="text-xl font-bold text-white md:text-2xl text-center md:text-right whitespace-nowrap">
+                          {awayTeamData?.team.displayName}
+                          {awayRecord && <span className="ml-1.5 whitespace-nowrap text-xs font-normal text-slate-400">({awayRecord})</span>}
+                        </h2>
                       </div>
-                      <div className="flex flex-col items-center px-2 md:min-w-[160px] md:px-6">
+                      <div className="flex flex-col items-center px-2 md:min-w-40 md:px-6">
                         <div className="text-xs text-slate-400 text-center space-y-0.5">
                           <div>{new Date(selectedGame.date).toLocaleTimeString()}</div>
-                          {venue && <div className="truncate max-w-[140px]" title={venue}>{venue}</div>}
-                          {weather && (
-                            <div className={`${
-                              weather.displayValue?.toLowerCase().includes('rain') ||
-                              weather.displayValue?.toLowerCase().includes('snow') ||
-                              weather.displayValue?.toLowerCase().includes('wind') ||
-                              (weather.temperature && weather.temperature < 32) ||
-                              (weather.temperature && weather.temperature > 90)
-                                ? 'text-orange-300 font-medium' 
-                                : ''
-                            }`}>
-                              {weather.displayValue}
-                              {weather.temperature && `, ${weather.temperature}°F`}
+                          {(venue || weather) && (
+                            <div className="truncate max-w-60" title={[venue, weather?.displayValue].filter(Boolean).join(' · ')}>
+                              {venue}
+                              {venue && weather && ' · '}
+                              {weather && (
+                                <span className={
+                                  weather.displayValue?.toLowerCase().includes('rain') ||
+                                  weather.displayValue?.toLowerCase().includes('snow') ||
+                                  weather.displayValue?.toLowerCase().includes('wind') ||
+                                  (weather.temperature && weather.temperature < 32) ||
+                                  (weather.temperature && weather.temperature > 90)
+                                    ? 'text-orange-300 font-medium'
+                                    : ''
+                                }>
+                                  {weather.displayValue}
+                                  {weather.temperature && `, ${weather.temperature}°F`}
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
                       </div>
-                      <div className="flex items-start gap-3 flex-1 justify-center md:justify-start">
-                        <div className="text-center md:text-left">
-                          <h2 className="text-xl font-bold text-white md:text-2xl">{homeTeamData?.team.displayName}</h2>
-                          {homeRecord && <div className="text-xs text-slate-400">({homeRecord})</div>}
-                        </div>
+                      <div className="flex items-center gap-3 flex-1 justify-center md:justify-start">
+                        <h2 className="text-xl font-bold text-white md:text-2xl text-center md:text-left whitespace-nowrap">
+                          {homeTeamData?.team.displayName}
+                          {homeRecord && <span className="ml-1.5 whitespace-nowrap text-xs font-normal text-slate-400">({homeRecord})</span>}
+                        </h2>
                         {homeTeamData?.team?.logo && (
                           <img src={homeTeamData.team.logo} alt={homeTeamData.team.displayName} className="w-10 h-10" style={{marginTop: '-5px'}} />
                         )}
@@ -925,5 +935,6 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
 
       {/* Removed temporary user selector modal - using permanent database solution */}
     </div>
+    </>
   )
 }
