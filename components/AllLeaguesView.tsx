@@ -301,7 +301,7 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {leagueLineups.map((league) => (
               <div key={league.leagueId} className="card p-6">
                 <h2 className="text-xl font-bold text-white mb-4 border-b border-slate-700 pb-2">
@@ -389,13 +389,6 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
                     )}
                   </div>
                 </div>
-
-                {/* Matchup Info */}
-                {league.matchupId && (
-                  <div className="mt-4 pt-3 border-t border-slate-700 text-center text-xs text-slate-400">
-                    Matchup ID: {league.matchupId}
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -412,7 +405,7 @@ export default function AllLeaguesView({ user, onBackToDashboard }: AllLeaguesVi
               type="button"
               onClick={() => setError('')}
               aria-label="Close error message"
-              className="ml-auto text-xs opacity-75 hover:opacity-100"
+              className="ml-auto shrink-0 rounded px-3 py-2 text-xs opacity-75 hover:opacity-100"
             >
               Close
             </button>

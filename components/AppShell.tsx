@@ -32,7 +32,7 @@ export default function AppShell({ user, currentView, onNavigate, onLogout, chil
 
       <header className="sticky top-0 z-40 border-b border-slate-700/80 bg-slate-900/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 md:px-6">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <button
               type="button"
               onClick={() => onNavigate('dashboard')}
@@ -67,7 +67,7 @@ export default function AppShell({ user, currentView, onNavigate, onLogout, chil
                     type="button"
                     onClick={() => onNavigate(item.view)}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                    className={`rounded-lg border px-4 py-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
                       isActive
                         ? 'border-blue-500 bg-blue-600 text-white shadow-lg shadow-blue-950/40'
                         : 'border-slate-600 bg-slate-800 text-slate-200 hover:border-slate-500 hover:bg-slate-700'
@@ -82,7 +82,7 @@ export default function AppShell({ user, currentView, onNavigate, onLogout, chil
             <button
               type="button"
               onClick={onLogout}
-              className="btn btn-secondary w-full sm:w-auto"
+              className="btn btn-secondary w-full py-3 sm:w-auto sm:self-start md:self-auto"
             >
               Sign Out
             </button>

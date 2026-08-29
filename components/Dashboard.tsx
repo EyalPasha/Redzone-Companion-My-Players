@@ -17,7 +17,8 @@ interface DashboardProps {
 
 export default function Dashboard({ user, onStartRedZoneSession, onViewAllLeagues }: DashboardProps) {
   const [leagues, setLeagues] = useState<UserLeague[]>(() =>
-    storage.getUserLeagues()?.filter(league => league.user_id === user.id) ?? []
+    (storage.getUserLeagues()?.filter(league => league.user_id === user.id) ?? [])
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   )
   const [newLeagueId, setNewLeagueId] = useState('')
   const [newLeagueNickname, setNewLeagueNickname] = useState('')
@@ -70,6 +71,7 @@ export default function Dashboard({ user, onStartRedZoneSession, onViewAllLeague
 
   const addLeague = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (pendingLeagueId) return
     const leagueId = newLeagueId.trim()
     if (!leagueId) return
 
@@ -139,12 +141,15 @@ export default function Dashboard({ user, onStartRedZoneSession, onViewAllLeague
     setMessage('')
   }
 
-  const removeLeague = async (leagueId: number) => {
+  const removeLeague = async (league: UserLeague) => {
+    const name = league.custom_nickname || league.league_name || 'this league'
+    if (!window.confirm(`Remove "${name}"? This cannot be undone.`)) return
+
     try {
       const { error } = await supabase
         .from('user_leagues')
         .delete()
-        .eq('id', leagueId)
+        .eq('id', league.id)
         .eq('user_id', user.id)
 
       if (error) throw error
@@ -302,14 +307,14 @@ export default function Dashboard({ user, onStartRedZoneSession, onViewAllLeague
                         <button
                           type="button"
                           onClick={() => saveEditNickname(league.id)}
-                          className="btn btn-primary text-xs px-2 py-1"
+                          className="btn btn-primary text-xs px-3 py-3"
                         >
                           Save
                         </button>
                         <button
                           type="button"
                           onClick={cancelEditNickname}
-                          className="btn btn-secondary text-xs px-2 py-1"
+                          className="btn btn-secondary text-xs px-3 py-3"
                         >
                           Cancel
                         </button>
@@ -338,15 +343,15 @@ export default function Dashboard({ user, onStartRedZoneSession, onViewAllLeague
                         type="button"
                         onClick={() => startEditNickname(league)}
                         aria-label={`Edit ${league.custom_nickname || league.league_name || 'league'}`}
-                        className="btn btn-secondary text-xs px-3 py-1.5"
+                        className="btn btn-secondary text-xs px-3 py-3"
                       >
                         Edit
                       </button>
                       <button
                         type="button"
-                        onClick={() => removeLeague(league.id)}
+                        onClick={() => removeLeague(league)}
                         aria-label={`Remove ${league.custom_nickname || league.league_name || 'league'}`}
-                        className="btn btn-danger text-xs px-3 py-1.5"
+                        className="btn btn-danger text-xs px-3 py-3"
                       >
                         Remove
                       </button>

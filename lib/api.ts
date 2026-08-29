@@ -229,12 +229,35 @@ export const fetchSleeperMatchups = async (leagueId: string, week: number, signa
   )
 }
 
+// Sleeper's players/nfl payload is several MB; Sleeper's API guidance asks
+// clients not to call it more than once a day, so keep it in memory for the
+// session instead of refetching on every view load or manual refresh.
+let sleeperPlayersCache: { timestamp: number, players: SleeperPlayers } | null = null
+let sleeperPlayersInFlight: Promise<SleeperPlayers> | null = null
+const SLEEPER_PLAYERS_CACHE_DURATION = 24 * 60 * 60 * 1000 // 24 hours
+
 export const fetchSleeperPlayers = async (signal?: AbortSignal): Promise<SleeperPlayers> => {
-  return fetchJson<SleeperPlayers>(
-    'https://api.sleeper.app/v1/players/nfl',
-    'Sleeper players API error',
-    signal
-  )
+  const now = Date.now()
+  if (sleeperPlayersCache && (now - sleeperPlayersCache.timestamp) < SLEEPER_PLAYERS_CACHE_DURATION) {
+    return sleeperPlayersCache.players
+  }
+
+  if (!sleeperPlayersInFlight) {
+    // Intentionally not forwarding `signal` here: this fetch is shared across
+    // every caller waiting on it, so one caller's unmount/abort must not cancel
+    // the request for the others.
+    sleeperPlayersInFlight = fetchJson<SleeperPlayers>(
+      'https://api.sleeper.app/v1/players/nfl',
+      'Sleeper players API error'
+    ).then((players) => {
+      sleeperPlayersCache = { timestamp: Date.now(), players }
+      return players
+    }).finally(() => {
+      sleeperPlayersInFlight = null
+    })
+  }
+
+  return sleeperPlayersInFlight
 }
 
 export const fetchSleeperLeague = async (leagueId: string, signal?: AbortSignal): Promise<SleeperLeague> => {

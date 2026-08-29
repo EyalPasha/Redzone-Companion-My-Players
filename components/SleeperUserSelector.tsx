@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { fetchSleeperLeagueUsers } from '@/lib/api'
 import { getErrorMessage, isAbortError } from '@/lib/errors'
 import { SleeperUser } from '@/types'
@@ -16,6 +16,19 @@ export default function SleeperUserSelector({ leagueId, disabled = false, onUser
   const [users, setUsers] = useState<SleeperUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null
+    return () => {
+      previousFocusRef.current?.focus?.()
+    }
+  }, [])
+
+  useEffect(() => {
+    dialogRef.current?.focus()
+  }, [loading, error])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -45,6 +58,25 @@ export default function SleeperUserSelector({ leagueId, disabled = false, onUser
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !disabled) {
         onCancel()
+        return
+      }
+
+      if (event.key === 'Tab' && dialogRef.current) {
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+        if (focusable.length === 0) return
+
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
       }
     }
 
@@ -55,7 +87,7 @@ export default function SleeperUserSelector({ leagueId, disabled = false, onUser
   if (loading) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50">
-        <div className="card max-w-md w-full mx-4 p-8 text-center" role="dialog" aria-modal="true" aria-labelledby="sleeper-users-loading-title" aria-busy="true">
+        <div ref={dialogRef} tabIndex={-1} className="card max-w-md w-full mx-4 p-8 text-center" role="dialog" aria-modal="true" aria-labelledby="sleeper-users-loading-title" aria-busy="true">
           <h3 id="sleeper-users-loading-title" className="text-2xl font-semibold text-white mb-6">Loading league users...</h3>
           <div className="animate-spin rounded-full h-12 w-12 border-4 border-slate-600 border-t-blue-500 mx-auto"></div>
         </div>
@@ -66,7 +98,7 @@ export default function SleeperUserSelector({ leagueId, disabled = false, onUser
   if (error) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50">
-        <div className="card max-w-md w-full mx-4 p-8" role="dialog" aria-modal="true" aria-labelledby="sleeper-users-error-title">
+        <div ref={dialogRef} tabIndex={-1} className="card max-w-md w-full mx-4 p-8" role="dialog" aria-modal="true" aria-labelledby="sleeper-users-error-title">
           <h3 id="sleeper-users-error-title" className="text-2xl font-semibold text-red-400 mb-4">Error Loading Users</h3>
           <p className="text-red-300 mb-6" role="alert">{error}</p>
           <button
@@ -83,13 +115,13 @@ export default function SleeperUserSelector({ leagueId, disabled = false, onUser
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="card max-w-md w-full mx-4 max-h-96 overflow-y-auto p-8" role="dialog" aria-modal="true" aria-labelledby="sleeper-users-title" aria-describedby="sleeper-users-description">
+      <div ref={dialogRef} tabIndex={-1} className="card max-w-md w-full mx-4 max-h-96 flex flex-col p-8" role="dialog" aria-modal="true" aria-labelledby="sleeper-users-title" aria-describedby="sleeper-users-description">
         <h3 id="sleeper-users-title" className="text-2xl font-semibold text-white mb-3">Select Your User</h3>
         <p className="text-slate-400 mb-6 text-sm">
           Choose which user represents you in this league
         </p>
-        
-        <div id="sleeper-users-description" className="space-y-3 mb-6">
+
+        <div id="sleeper-users-description" className="space-y-3 mb-6 overflow-y-auto min-h-0">
           {users.length === 0 ? (
             <p className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-sm text-slate-300">
               No Sleeper users were found for this league.

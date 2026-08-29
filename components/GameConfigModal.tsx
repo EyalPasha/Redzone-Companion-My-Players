@@ -132,9 +132,9 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="card max-w-5xl w-full mx-4 max-h-[90vh] overflow-y-auto p-4" role="dialog" aria-modal="true" aria-labelledby="game-config-title">
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
           <h2 id="game-config-title" className="text-xl font-semibold text-white">Configure Games</h2>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button type="button" onClick={resetToDefault} className="btn btn-secondary text-sm">
               Reset All
             </button>
@@ -148,7 +148,7 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
         </div>
 
         {/* Window Filter Buttons */}
-        <div className="flex gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4">
           <button
             type="button"
             onClick={() => applyWindowFilter('all')}
@@ -192,6 +192,11 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
         </div>
 
         {/* Compact Grid View */}
+        {config.length === 0 ? (
+          <div className="text-center text-slate-400 text-sm py-8">
+            No games available this week
+          </div>
+        ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {config.map((gameConfig) => {
             const { homeTeam, awayTeam, time } = getGameInfo(gameConfig.gameId)
@@ -269,6 +274,7 @@ export default function GameConfigModal({ games, gameConfig, onClose, onSave }: 
             )
           })}
         </div>
+        )}
 
       </div>
     </div>

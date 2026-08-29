@@ -10,11 +10,13 @@ export default function AuthForm() {
   const [isLogin, setIsLogin] = useState(true)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [isError, setIsError] = useState(false)
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setMessage('')
+    setIsError(false)
 
     try {
       if (isLogin) {
@@ -34,6 +36,7 @@ export default function AuthForm() {
       }
     } catch (error: unknown) {
       setMessage(getErrorMessage(error))
+      setIsError(true)
     } finally {
       setLoading(false)
     }
@@ -90,6 +93,7 @@ export default function AuthForm() {
         <button
           type="button"
           onClick={() => setIsLogin(!isLogin)}
+          disabled={loading}
           className="text-blue-400 hover:text-blue-300 text-sm font-medium transition-colors"
         >
           {isLogin ? "Don't have an account? Create one" : 'Already have an account? Sign in'}
@@ -98,12 +102,12 @@ export default function AuthForm() {
 
       {message && (
         <div className={`mt-6 p-4 rounded-lg text-sm border ${
-          message.includes('successfully') || message.includes('email') 
-            ? 'bg-emerald-900/50 text-emerald-300 border-emerald-700' 
-            : 'bg-red-900/50 text-red-300 border-red-700'
+          isError
+            ? 'bg-red-900/50 text-red-300 border-red-700'
+            : 'bg-emerald-900/50 text-emerald-300 border-emerald-700'
         }`}
-          role={message.includes('successfully') || message.includes('email') ? 'status' : 'alert'}
-          aria-live={message.includes('successfully') || message.includes('email') ? 'polite' : 'assertive'}
+          role={isError ? 'alert' : 'status'}
+          aria-live={isError ? 'assertive' : 'polite'}
         >
           {message}
         </div>

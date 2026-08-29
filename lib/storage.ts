@@ -209,13 +209,13 @@ export const storage = {
   },
 
   // UI state
-  getSelectedGame: (): number | null => {
-    return storage.get<number>(STORAGE_KEYS.SELECTED_GAME)
+  getSelectedGame: (): string | null => {
+    return storage.get<string>(STORAGE_KEYS.SELECTED_GAME)
   },
 
-  setSelectedGame: (index: number | null) => {
-    if (index !== null) {
-      storage.setImmediate(STORAGE_KEYS.SELECTED_GAME, index)
+  setSelectedGame: (gameId: string | null) => {
+    if (gameId !== null) {
+      storage.setImmediate(STORAGE_KEYS.SELECTED_GAME, gameId)
     } else if (hasLocalStorage()) {
       clearPendingWrite(STORAGE_KEYS.SELECTED_GAME)
       localStorage.removeItem(STORAGE_KEYS.SELECTED_GAME)

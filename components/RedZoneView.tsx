@@ -24,7 +24,7 @@ interface RedZoneViewProps {
 
 export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProps) {
   const [games, setGames] = useState<ESPNGame[]>(() => storage.getGames() ?? [])
-  const [selectedGameIndex, setSelectedGameIndex] = useState<number | null>(() => storage.getSelectedGame())
+  const [selectedGameId, setSelectedGameId] = useState<string | null>(() => storage.getSelectedGame())
   const [userLeagues, setUserLeagues] = useState<UserLeague[]>([])
   const [playerLineups, setPlayerLineups] = useState<PlayerLineup[]>(() => storage.getPlayerLineups() ?? [])
   const [loading, setLoading] = useState(false)
@@ -301,21 +301,23 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
       if (key >= '1' && key <= '9') {
         const gameIndex = parseInt(key) - 1
         if (gameIndex < filteredGames.length) {
-          setSelectedGameIndex(gameIndex)
-          storage.setSelectedGame(gameIndex)
+          const gameId = filteredGames[gameIndex].id
+          setSelectedGameId(gameId)
+          storage.setSelectedGame(gameId)
         }
       } else if (key.toLowerCase() >= 'a' && key.toLowerCase() <= 'z') {
         const gameIndex = 9 + (key.toLowerCase().charCodeAt(0) - 'a'.charCodeAt(0))
         if (gameIndex < filteredGames.length) {
-          setSelectedGameIndex(gameIndex)
-          storage.setSelectedGame(gameIndex)
+          const gameId = filteredGames[gameIndex].id
+          setSelectedGameId(gameId)
+          storage.setSelectedGame(gameId)
         }
       }
     }
 
     window.addEventListener('keydown', handleKeyPress)
     return () => window.removeEventListener('keydown', handleKeyPress)
-  }, [filteredGames.length])
+  }, [filteredGames])
 
   // Close league filter dropdown when clicking outside
   useEffect(() => {
@@ -334,9 +336,9 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
     storage.setGameConfig(newConfig)
   }, [])
 
-  const handleGameClick = useCallback((index: number) => {
-    setSelectedGameIndex(index)
-    storage.setSelectedGame(index)
+  const handleGameClick = useCallback((gameId: string) => {
+    setSelectedGameId(gameId)
+    storage.setSelectedGame(gameId)
   }, [])
 
   const getKeyboardLabel = (index: number): string => {
@@ -445,14 +447,9 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
 
   // Memoized selected game and players calculation to avoid unnecessary recalculations
   // IMPORTANT: Must be before any conditional returns to maintain hook order
-  const activeSelectedGameIndex = useMemo(() =>
-    selectedGameIndex !== null && selectedGameIndex < filteredGames.length ? selectedGameIndex : null,
-    [selectedGameIndex, filteredGames.length]
-  )
-
   const selectedGame = useMemo(() =>
-    activeSelectedGameIndex !== null ? filteredGames[activeSelectedGameIndex] : null,
-    [activeSelectedGameIndex, filteredGames]
+    selectedGameId !== null ? filteredGames.find(game => game.id === selectedGameId) ?? null : null,
+    [selectedGameId, filteredGames]
   )
 
   const selectedGamePlayers = useMemo(() =>
@@ -503,6 +500,16 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
             <div className="flex items-start gap-3">
               <div className="text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true">!</div>
               <div>{error}</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setError('')
+                }}
+                aria-label="Close error message"
+                className="ml-auto text-xs opacity-75 hover:opacity-100"
+              >
+                Close
+              </button>
             </div>
           </div>
         )}
@@ -558,7 +565,7 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
                           type="button"
                           onClick={() => toggleLeagueVisibility(league.id)}
                           aria-pressed={!hiddenLeagues.has(league.id)}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors flex items-center justify-between group"
+                          className="w-full text-left px-3 py-3 hover:bg-slate-700 transition-colors flex items-center justify-between group"
                         >
                           <span className="text-sm text-white truncate">{league.name}</span>
                           <div className={`w-4 h-4 rounded border ${
@@ -598,13 +605,13 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
             {filteredGames.map((game, index) => {
               const homeTeam = game.competitions[0]?.competitors.find(c => c.homeAway === 'home')
               const awayTeam = game.competitions[0]?.competitors.find(c => c.homeAway === 'away')
-              const isSelected = activeSelectedGameIndex === index
-              
+              const isSelected = selectedGame?.id === game.id
+
               return (
                 <button
                   key={game.id}
                   type="button"
-                  onClick={() => handleGameClick(index)}
+                  onClick={() => handleGameClick(game.id)}
                   aria-pressed={isSelected}
                   aria-label={`Select ${awayTeam?.team.abbreviation || 'away team'} at ${homeTeam?.team.abbreviation || 'home team'}`}
                   className={`px-1 py-3 rounded-lg text-sm font-medium transition-all border min-w-[110px] ${
@@ -887,15 +894,9 @@ export default function RedZoneView({ user, onBackToDashboard }: RedZoneViewProp
       </div>
 
       {error && (
-        <div className={`fixed bottom-6 left-6 right-6 max-w-lg mx-auto backdrop-blur-sm p-4 rounded-lg shadow-lg ${
-          error 
-            ? 'bg-red-900/90 border border-red-700 text-red-100' 
-            : 'bg-green-900/90 border border-green-700 text-green-100'
-        }`} role="alert" aria-live="assertive">
+        <div className="fixed bottom-6 left-6 right-6 max-w-lg mx-auto backdrop-blur-sm p-4 rounded-lg shadow-lg bg-red-900/90 border border-red-700 text-red-100" role="alert" aria-live="assertive">
           <div className="flex items-start gap-3">
-            <div className={`flex-shrink-0 mt-0.5 ${error ? 'text-red-400' : 'text-green-400'}`} aria-hidden="true">
-              {error ? '!' : 'OK'}
-            </div>
+            <div className="flex-shrink-0 mt-0.5 text-red-400" aria-hidden="true">!</div>
             <div>{error}</div>
             <button
               type="button"
